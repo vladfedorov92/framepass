@@ -1,9 +1,18 @@
 {
   "name": "framepass",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Storage Access API made practical: cross-site cookie access for embedded iframes, with host bridge and server middleware.",
   "type": "module",
   "license": "MIT",
+  "author": "Vlad Fedorov (https://github.com/vladfedorov92)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vladfedorov92/framepass.git"
+  },
+  "homepage": "https://github.com/vladfedorov92/framepass#readme",
+  "bugs": {
+    "url": "https://github.com/vladfedorov92/framepass/issues"
+  },
   "exports": {
     "./core": {
       "types": "./dist/core/index.d.ts",
