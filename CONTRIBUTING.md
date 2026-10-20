@@ -1,64 +1,64 @@
-# Участие в разработке framepass
+# Contributing to framepass
 
-## Подготовка
+## Setup
 
 ```sh
 git clone https://github.com/vladfedorov92/framepass.git
 cd framepass
-npm install        # заодно собирает dist/
+npm install        # also builds dist/
 ```
 
-Нужен Node.js 18 или новее.
+Requires Node.js 18 or newer.
 
-| Команда | |
+| Command | |
 |---|---|
-| `npm run build` | сборка TypeScript в `dist/` |
-| `npm test` | сборка и тесты (`node:test`) |
-| `npm run demo` | демо-стенд на двух сайтах |
+| `npm run build` | compile TypeScript into `dist/` |
+| `npm test` | build and run the tests (`node:test`) |
+| `npm run demo` | two-site demo |
 
-## Структура
+## Layout
 
 ```
-src/core     общие типы, протокол сообщений, определение возможностей
-src/embed    SDK для iframe
-src/host     SDK для сайта-партнёра
+src/core     shared types, message protocol, capability detection
+src/embed    SDK for the iframe
+src/host     SDK for the partner site
 src/server   Node middleware
-src/visit    хелпер для страниц первого визита
-test/        тесты
-demo/        демо-стенд
+src/visit    helper for first-party visit pages
+test/        tests
+demo/        demo
 ```
 
-## Демо
+## Demo
 
 ```sh
 npm run demo
 ```
 
-1. `http://localhost:4000` — сайт виджета, войдите на нём.
-2. `http://127.0.0.1:3000` — сайт-партнёр с iframe виджета.
-3. `http://127.0.0.1:3000/?visit=login` — то же, но окном первого визита служит страница входа виджета.
+1. `http://localhost:4000`: the widget site, sign in there.
+2. `http://127.0.0.1:3000`: the partner site with the widget iframe.
+3. `http://127.0.0.1:3000/?visit=login`: same, but the widget's login page serves as the first-party visit popup.
 
-Это разные сайты, поэтому куки виджета считаются сторонними. Удобнее всего проверять в
-Chrome Incognito и Firefox. Safari не принимает Secure-куки по http: выпустите сертификаты
-(например, `mkcert host.test widget.test`), пропишите домены в hosts и запустите:
+These are different sites, so the widget's cookies are third-party. Chrome Incognito and Firefox
+are the easiest to test with. Safari does not accept Secure cookies over http: issue certificates
+(e.g. `mkcert host.test widget.test`), add the domains to your hosts file and run:
 
 ```sh
 FRAMEPASS_CERT=cert.pem FRAMEPASS_KEY=key.pem \
 HOST_ORIGIN=https://host.test:3000 WIDGET_ORIGIN=https://widget.test:4000 npm run demo
 ```
 
-## Pull request
+## Pull requests
 
-- Перед отправкой должен проходить `npm test`.
-- Новое поведение покрывайте тестами в `test/`.
-- Если меняется поведение в браузере, опишите, в каких браузерах и режимах вы проверяли его через демо.
-- Меняется публичный API — обновите README.
+- `npm test` must pass.
+- Cover new behaviour with tests in `test/`.
+- If browser behaviour changes, say which browsers and modes you checked with the demo.
+- If the public API changes, update the README.
 
-## Публикация (для мейнтейнеров)
+## Releasing (maintainers)
 
 ```sh
 npm test
-npm version patch     # или minor / major — коммит и тег
-npm publish           # dist/ собирается автоматически (prepare)
+npm version patch     # or minor / major: commits and tags
+npm publish           # dist/ is built automatically (prepare)
 git push --follow-tags
 ```

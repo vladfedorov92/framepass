@@ -1,21 +1,21 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Сайт виджета</title>
+  <title>Widget site</title>
   <style>body { font: 16px/1.5 system-ui, sans-serif; max-width: 36rem; margin: 3rem auto; padding: 0 1rem; }</style>
 </head>
 <body>
-  <h1>Сайт виджета <small><code>__WIDGET_ORIGIN__</code></small></h1>
-  <p>Это «первая сторона» для виджета. Здесь ставится сессионная кука <code>demo_session</code>.</p>
+  <h1>Widget site <small><code>__WIDGET_ORIGIN__</code></small></h1>
+  <p>This is the widget's first party. The <code>demo_session</code> session cookie is set here.</p>
   <p>__USER__</p>
   <form method="post" action="/login">
-    <input name="name" placeholder="Имя" required>
-    <button>Войти</button>
+    <input name="name" placeholder="Name" required>
+    <button>Sign in</button>
   </form>
-  <p id="back" hidden><button type="button">Вернуться к виджету</button></p>
-  <p>Потом откройте <a href="__HOST_ORIGIN__/">сайт-партнёр</a> и проверьте, видит ли виджет сессию.</p>
+  <p id="back" hidden><button type="button">Back to the widget</button></p>
+  <p>Then open the <a href="__HOST_ORIGIN__/">partner site</a> and check whether the widget sees the session.</p>
 
   <script type="module">
     import { isVisitPopup, notifyVisited } from '/lib/visit/index.js';

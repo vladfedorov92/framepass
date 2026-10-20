@@ -1,70 +1,73 @@
 # framepass
 
-Доступ к своим кукам из iframe, встроенного на чужие сайты, через
-[Storage Access API](https://developer.mozilla.org/ru/docs/Web/API/Storage_Access_API).
+[![npm](https://img.shields.io/npm/v/framepass)](https://www.npmjs.com/package/framepass)
+[![license](https://img.shields.io/npm/l/framepass)](LICENSE)
 
-framepass для тех, у кого есть виджет, чат, плеер, форма или кнопка «войти»,
-которые живут в iframe на сайтах партнёров и должны видеть сессию пользователя
-на вашем домене.
+Read your own cookies from an iframe embedded on other sites, using the
+[Storage Access API](https://developer.mozilla.org/en-US/docs/Web/API/Storage_Access_API).
 
-> framepass **не обходит** защиту браузеров. Он честно запрашивает разрешение
-> у браузера и пользователя и берёт на себя всё, из-за чего этот запрос обычно не срабатывает.
+framepass is for widgets, chats, players, forms and "sign in" buttons that live in an iframe
+on partner sites and need to see the user's session on your domain.
 
-- [Проблема](#проблема)
-- [Установка](#установка)
-- [Быстрый старт](#быстрый-старт)
-- [Как это работает](#как-это-работает)
+> framepass does **not** bypass browser privacy protections. It asks the browser and the user
+> for permission, and handles everything that usually makes that request fail.
+
+- [The problem](#the-problem)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [How it works](#how-it-works)
 - [API](#api)
-- [Поддержка браузеров](#поддержка-браузеров)
-- [Если доступа нет](#если-доступа-нет)
+- [Browser support](#browser-support)
+- [When access is not available](#when-access-is-not-available)
+- [Security](#security)
 
-## Проблема
+## The problem
 
-Куки вашего домена внутри iframe на чужом сайте — сторонние, и браузеры их прячут:
+Inside an iframe on someone else's site, your domain's cookies are third-party cookies, and browsers hide them:
 
-| Браузер | Обычный режим | Инкогнито |
+| Browser | Normal mode | Private / Incognito |
 |---|---|---|
-| Chrome / Edge | доступны | заблокированы (кроме `Partitioned`) |
-| Firefox | Total Cookie Protection: свой «карман» кук на каждый сайт | то же |
-| Safari | заблокированы (ITP) | заблокированы |
+| Chrome / Edge | available | blocked (except `Partitioned`) |
+| Firefox | Total Cookie Protection: a separate cookie jar per top-level site | same |
+| Safari | blocked (ITP) | blocked |
 
-Storage Access API позволяет попросить доступ, но у него много условий. Запрос
-делается только из iframe и только по клику внутри него, причём синхронно в
-обработчике. В Safari и Firefox пользователь должен до этого хоть раз открыть ваш
-сайт напрямую. Нужны правильный `sandbox`, куки с `SameSite=None; Secure` и повторная
-активация при каждой загрузке. framepass выполняет все эти условия.
+The Storage Access API lets you ask for access, but it comes with many conditions. The request
+must be made from inside the iframe, on a click inside that iframe, synchronously in the handler.
+Safari and Firefox also require the user to have visited your site directly before. You need the
+right `sandbox` flags, cookies with `SameSite=None; Secure`, and re-activation on every load.
+framepass takes care of all of that.
 
-## Установка
+## Installation
 
 ```sh
 npm install framepass
 ```
 
-Пока пакет не опубликован в npm, его можно поставить прямо с GitHub:
+Or the latest code from GitHub:
 
 ```sh
 npm install github:vladfedorov92/framepass
 ```
 
-Пакет поставляется как ES-модули с типами TypeScript и без зависимостей.
-Серверной части нужен Node.js 18 или новее.
+The package ships as ES modules with TypeScript types and has no dependencies.
+The server part needs Node.js 18 or newer.
 
-Пакет состоит из трёх частей, каждая подключается там, где нужна:
+Each part is imported where it runs:
 
-| Импорт | Где работает | Что делает |
+| Import | Runs | What it does |
 |---|---|---|
-| `framepass/embed` | внутри iframe, на вашем домене | проверяет и запрашивает доступ, управляет кнопкой, отвечает на вызовы |
-| `framepass/host` | на сайте-партнёре | вставляет iframe и даёт вызывать его методы |
-| `framepass/server` | на сервере вашего домена (Node) | служебные эндпоинты, заголовки, хелперы для кук |
-| `framepass/visit` | на любой странице вашего сайта | `notifyVisited()` — сделать, например, страницу входа окном первого визита |
+| `framepass/embed` | inside the iframe, on your domain | checks and requests access, drives the button, answers calls |
+| `framepass/host` | on the partner site | mounts the iframe and lets the page call its methods |
+| `framepass/server` | on your domain's server (Node) | service endpoints, headers, cookie helpers |
+| `framepass/visit` | on any page of your site | `notifyVisited()`: turns e.g. your login page into the first-party visit popup |
 
-`framepass/core` содержит общие типы и утилиты, если они понадобятся напрямую.
+`framepass/core` exposes the shared types and utilities if you need them directly.
 
-## Быстрый старт
+## Quick start
 
-Пример: виджет живёт на `https://widget.example`, партнёр — `https://shop.example`.
+Example: the widget lives on `https://widget.example`, the partner is `https://shop.example`.
 
-### 1. Сервер виджета
+### 1. Widget server
 
 ```js
 import express from 'express';
@@ -74,12 +77,12 @@ const app = express();
 
 app.use(framepass({
   allowedOrigins: ['https://shop.example'],
-  embedPaths: ['/embed'],   // только партнёры смогут встроить эти страницы
+  embedPaths: ['/embed'],   // only partners may frame these pages
 }));
 
 app.post('/login', (req, res) => {
-  // Основная сессия сайта остаётся SameSite=Lax. Для виджета — отдельная кука
-  // с ограниченными правами: только она SameSite=None (см. «Безопасность»).
+  // Keep the main site session SameSite=Lax. Give the widget its own limited-scope
+  // cookie: only that one is SameSite=None (see "Security").
   res.setHeader('Set-Cookie', [
     serializeCookie('session', createToken(req), { httpOnly: true, sameSite: 'lax' }),
     serializeCookie('widget_session', createWidgetToken(req), { httpOnly: true }),
@@ -90,19 +93,21 @@ app.post('/login', (req, res) => {
 app.get('/embed', (req, res) => res.sendFile('embed.html', { root: 'public' }));
 ```
 
-Middleware работает и с голым `http.createServer`. Без `next` он возвращает `true`, если сам ответил на запрос:
+The middleware also works with a bare `http.createServer`. Without `next` it returns `true` when it has answered the request:
 
 ```js
+const fp = framepass({ allowedOrigins: ['https://shop.example'] });
+
 http.createServer((req, res) => {
   if (fp(req, res)) return;
-  // ...ваши маршруты
+  // ...your routes
 });
 ```
 
-### 2. Страница iframe (`/embed`)
+### 2. The iframe page (`/embed`)
 
 ```html
-<button id="allow" hidden>Разрешить доступ</button>
+<button id="allow" hidden>Allow access</button>
 
 <script type="module">
   import { createEmbed } from 'framepass/embed';
@@ -114,13 +119,13 @@ http.createServer((req, res) => {
     },
   });
 
-  // кнопка сама показывается, когда нужен клик, и прячется, когда доступ есть
+  // the button shows itself when a click is needed and hides once access is there
   embed.attach(document.getElementById('allow'));
   embed.on('change', (state) => console.log('access:', state));
 </script>
 ```
 
-### 3. Сайт-партнёр
+### 3. Partner site
 
 ```js
 import { mountEmbed } from 'framepass/host';
@@ -131,52 +136,53 @@ widget.on('state', (state) => console.log('widget access:', state));
 const session = await widget.call('getSession');
 ```
 
-## Как это работает
+## How it works
 
 ```
-              check()                         клик по кнопке
+              check()                            button click
 unknown ──────────────┬─► not-needed          ┌─────────────────► granted
-                      ├─► granted (молча)     │
+                      ├─► granted (silently)  │
                       ├─► needs-gesture ──────┤
-                      │                       └─ отказ ─► needs-first-party
-                      ├─► denied                            │ клик: popup на вашем сайте
-                      └─► unsupported                       ▼
-                                                     needs-gesture ─ клик ─► granted / denied
+                      │                       └─ rejected ─► needs-first-party
+                      ├─► waiting-host                         │ click: popup on your site
+                      ├─► denied                               ▼
+                      └─► unsupported               needs-gesture ─ click ─► granted / denied
 ```
 
-1. **Проверка без запроса.** Если куки уже доступны (например, обычный режим Chrome), состояние будет `not-needed`.
-2. **Тихая повторная активация.** Если пользователь уже разрешал доступ этой паре сайтов, framepass включает его снова без клика.
-3. **Кнопка.** Иначе показывается кнопка внутри iframe, а по клику вызывается `requestStorageAccess()`.
-4. **Первый визит.** Safari и Firefox сразу отказывают, если пользователь ни разу не открывал ваш сайт напрямую. Тогда следующий клик откроет всплывающее окно на вашем домене. Пользователь нажимает «Продолжить», окно закрывается, и снова нужен клик в iframe.
+1. **Check without prompting.** If cookies are already available (e.g. Chrome in normal mode), the state is `not-needed`.
+2. **Verify the parent.** Access is only ever requested when the embedding page is one of `allowedHosts`. Until that is confirmed the state is `waiting-host`.
+3. **Silent re-activation.** If the user already granted access for this pair of sites, framepass turns it back on without a click.
+4. **Button.** Otherwise a button inside the iframe is shown, and its click calls `requestStorageAccess()`.
+5. **First-party visit.** Safari and Firefox reject right away if the user has never opened your site directly. The next click then opens a popup on your domain; the user presses "Continue", the popup closes, and one more click in the iframe completes the request.
 
-Чтобы точно знать, доступны ли настоящие куки, сервер ставит маркер-куку при прямом
-визите на ваш сайт. Iframe спрашивает у сервера, долетает ли маркер.
+To know for sure that real (unpartitioned) cookies are reachable, the server sets a marker
+cookie on direct visits to your site, and the iframe asks the server whether the marker arrives.
 
-### Что видит пользователь
+### What the user sees
 
-framepass не рисует интерфейс в iframe и на сайте-партнёре: кнопку и подсказки делаете вы.
-Пользователь увидит:
+framepass draws no UI in the iframe or on the partner site: you build the button and hints.
+The user sees:
 
-1. **Вашу кнопку** внутри виджета — только когда нужен клик.
-2. **Системный диалог браузера** с вопросом, разрешить ли куки. Его рисует браузер, и изменить его нельзя.
-3. **Окно первого визита** — только в Safari и Firefox и только если пользователь ещё не бывал на вашем сайте.
+1. **Your button** inside the widget, only when a click is needed.
+2. **The browser's own prompt** asking whether to allow cookies. The browser renders it; you cannot change it.
+3. **The first-party visit popup**, only in Safari and Firefox and only if the user has not visited your site yet.
 
-### Окно первого визита
+### The first-party visit popup
 
-По умолчанию это простая страница `/__framepass/visit` с заголовком, текстом и кнопкой.
-Её можно заменить тремя способами.
+By default it is a simple page at `/__framepass/visit` with a title, a text and a button.
+There are three ways to replace it.
 
-**Свои тексты:**
+**Your own texts:**
 
 ```js
 framepass({
   allowedOrigins: [...],
-  visitPage: { lang: 'ru', title: 'Подключить виджет', text: '…', button: 'Продолжить', standalone: 'Готово' },
+  visitPage: { lang: 'en', title: 'Connect the widget', text: '…', button: 'Continue', standalone: 'Done' },
 });
 ```
 
-**Своя страница.** Функция возвращает HTML (можно асинхронно). framepass сам подключит
-`/__framepass/visit.js`, а кнопке достаточно атрибута `data-framepass-continue`:
+**Your own page.** A function returns HTML (sync or async). framepass injects
+`/__framepass/visit.js`; the button only needs the `data-framepass-continue` attribute:
 
 ```js
 framepass({
@@ -186,68 +192,68 @@ framepass({
 ```
 
 ```html
-<button data-framepass-continue data-framepass-popup>Продолжить</button>
-<p data-framepass-standalone hidden>Готово, вкладку можно закрыть.</p>
+<button data-framepass-continue data-framepass-popup>Continue</button>
+<p data-framepass-standalone hidden>Done, you can close this tab.</p>
 ```
 
-| Атрибут | |
+| Attribute | |
 |---|---|
-| `data-framepass-continue` | клик сообщает виджету о визите и закрывает окно |
-| `data-framepass-popup` | виден, только если страница открыта виджетом |
-| `data-framepass-standalone` | виден, только если страницу открыли напрямую |
+| `data-framepass-continue` | a click reports the visit to the widget and closes the popup |
+| `data-framepass-popup` | visible only when the page was opened by the widget |
+| `data-framepass-standalone` | visible only when the page was opened directly |
 
-Скрипт подключается внешним файлом, поэтому работает и со строгой CSP (`script-src 'self'`).
+The script is loaded as an external file, so it works under a strict CSP (`script-src 'self'`).
 
-**Любая страница вашего сайта**, например страница входа. Пользователь входит и тем же действием
-выполняет условие первого визита:
+**Any page of your site**, such as the login page. Signing in then also satisfies the
+first-party visit requirement:
 
 ```js
-// в iframe
+// in the iframe
 createEmbed({ allowedHosts: [...], firstPartyUrl: '/login?popup=1' });
 ```
 
 ```js
-// на странице /login, после успешного входа
+// on /login, after a successful sign-in
 import { isVisitPopup, notifyVisited } from 'framepass/visit';
 
 if (isVisitPopup()) {
   backButton.hidden = false;
-  backButton.onclick = () => notifyVisited();   // сообщит виджету и закроет окно
+  backButton.onclick = () => notifyVisited();   // tells the widget and closes the popup
 }
 ```
 
-Safari засчитывает визит только с действием пользователя: клик или отправка формы подходят,
-простое открытие страницы — нет.
+Safari only counts a visit with a user interaction: a click or a form submission works,
+merely opening the page does not.
 
 ## API
 
 ### `createEmbed(options)` — `framepass/embed`
 
-| Опция | Тип | По умолчанию | |
+| Option | Type | Default | |
 |---|---|---|---|
-| `allowedHosts` | `string[]` | — | origin'ы, которым можно встраивать iframe и вызывать методы. Доступ запрашивается только на этих сайтах. **Обязательно** |
-| `methods` | `Record<string, (params, ctx) => any>` | `{}` | методы для `widget.call()`; `ctx = { state, storage, origin }` |
-| `exposeErrors` | `boolean` | `false` | отдавать сайту-партнёру настоящий текст ошибок методов |
-| `unpartitioned` | `StorageType[]` | — | запросить неразделённые `localStorage`, `indexedDB` и т. п. (только Chromium) |
-| `probeUrl` | `string \| null` | `/__framepass/probe` | эндпоинт проверки кук |
-| `firstPartyUrl` | `string \| null` | `/__framepass/visit` | страница первого визита; `null` отключает всплывающее окно |
-| `autoCheck` | `boolean` | `true` | запустить `check()` сразу |
+| `allowedHosts` | `string[]` | — | origins allowed to embed the iframe and call its methods. Access is only requested on these sites. **Required** |
+| `methods` | `Record<string, (params, ctx) => any>` | `{}` | methods for `widget.call()`; `ctx = { state, storage, origin }` |
+| `exposeErrors` | `boolean` | `false` | send the real error messages of failed methods to the partner site |
+| `unpartitioned` | `StorageType[]` | — | request unpartitioned `localStorage`, `indexedDB`, etc. (Chromium only) |
+| `probeUrl` | `string \| null` | `/__framepass/probe` | cookie probe endpoint |
+| `firstPartyUrl` | `string \| null` | `/__framepass/visit` | first-party visit page; `null` disables the popup |
+| `autoCheck` | `boolean` | `true` | run `check()` right away |
 
-Возвращает объект:
+Returns:
 
 | | |
 |---|---|
-| `state` | текущее состояние (см. ниже) |
-| `storage` | `StorageAccessHandle` с неразделёнными хранилищами (если запрашивались) |
-| `check()` | определить состояние без запроса пользователю |
-| `request()` | запросить доступ. **Вызывать синхронно в обработчике клика внутри iframe** |
-| `attach(button)` | привязать кнопку: клик вызывает `request()`, а `hidden` выставляется по состоянию. Возвращает функцию отвязки |
-| `expose(methods)` | добавить методы |
-| `on('change', fn)` | подписка на смену состояния; возвращает отписку |
-| `destroy()` | снять обработчики |
+| `state` | current state (see below) |
+| `storage` | `StorageAccessHandle` with unpartitioned storage (if requested) |
+| `check()` | work out the state without prompting the user |
+| `request()` | request access. **Call it synchronously from a click handler inside the iframe** |
+| `attach(button)` | bind a button: its click calls `request()`, and `hidden` follows the state. Returns an unbind function |
+| `expose(methods)` | add methods |
+| `on('change', fn)` | subscribe to state changes; returns an unsubscribe function |
+| `destroy()` | remove listeners |
 
-Если метод бросает ошибку, партнёр получает только `framepass: "<метод>" failed`. Чтобы передать
-понятное сообщение, бросайте `PublicError`:
+When a method throws, the partner only receives `framepass: "<method>" failed`. To pass a
+readable message, throw a `PublicError`:
 
 ```js
 import { PublicError } from 'framepass/embed';
@@ -261,116 +267,120 @@ methods: {
 }
 ```
 
-### Состояния
+### States
 
-| Состояние | Что значит | Что делать |
+| State | Meaning | What to do |
 |---|---|---|
-| `unknown` | проверка ещё идёт | ждать |
-| `not-needed` | куки и так доступны | ничего |
-| `granted` | доступ получен | ничего |
-| `needs-gesture` | нужен клик в iframe | показать кнопку (`attach` делает это сам) |
-| `needs-first-party` | нужен визит на ваш сайт | следующий клик откроет всплывающее окно |
-| `waiting-host` | нужен запрос, но сайт-родитель ещё не подтверждён как один из `allowedHosts` | на сайте-партнёре подключите `framepass/host`; на чужом сайте так и останется |
-| `denied` | отказ | можно предложить ещё раз или [запасной путь](#если-доступа-нет) |
-| `unsupported` | API нет, куки недоступны | [запасной путь](#если-доступа-нет) |
+| `unknown` | check still running | wait |
+| `not-needed` | cookies are already available | nothing |
+| `granted` | access granted | nothing |
+| `needs-gesture` | a click inside the iframe is needed | show the button (`attach` does it for you) |
+| `needs-first-party` | a visit to your site is needed | the next click opens the popup |
+| `waiting-host` | a request is needed, but the parent page is not yet verified as one of `allowedHosts` | use `framepass/host` on the partner site; on any other site it stays this way |
+| `denied` | refused | offer to retry or a [fallback](#when-access-is-not-available) |
+| `unsupported` | no API and no cookie access | a [fallback](#when-access-is-not-available) |
 
-`hasAccess(state)` возвращает `true` для `not-needed` и `granted`.
+`hasAccess(state)` returns `true` for `not-needed` and `granted`.
 
 ### `mountEmbed(target, options)` — `framepass/host`
 
-| Опция | Тип | |
+| Option | Type | |
 |---|---|---|
-| `src` | `string` | адрес страницы iframe. **Обязательно** |
-| `sandbox` | `string[]` | если указать, framepass добавит нужные ему токены; без опции iframe не сэндбоксится |
-| `title` | `string` | `title` iframe (для доступности) |
-| `attributes` | `Record<string, string>` | любые атрибуты iframe |
-| `timeout` | `number` | таймаут `call()`, мс; по умолчанию 15000 |
+| `src` | `string` | URL of the iframe page. **Required** |
+| `sandbox` | `string[]` | when set, framepass appends the tokens it needs; without it the iframe is not sandboxed |
+| `title` | `string` | iframe `title` (accessibility) |
+| `attributes` | `Record<string, string>` | any extra iframe attributes |
+| `timeout` | `number` | `call()` timeout in ms; default 15000 |
 
-Возвращает `{ iframe, state, ready, call(method, params), on('state', fn), destroy() }`.
-Вызовы `call()` до готовности iframe ставятся в очередь.
+Returns `{ iframe, state, ready, call(method, params), on('state', fn), destroy() }`.
+Calls made before the iframe is ready are queued.
 
 ### `framepass(options)` — `framepass/server`
 
-| Опция | По умолчанию | |
+| Option | Default | |
 |---|---|---|
-| `allowedOrigins` | — | сайты-партнёры, строго в виде origin (`https://shop.example`, без `/` и `*`). **Обязательно** |
-| `embedPaths` | — | страницы для iframe (`'/embed'` — сама страница и всё под `/embed/`, или `RegExp`); получат `frame-ancestors` по `allowedOrigins` |
-| `basePath` | `/__framepass` | префикс служебных эндпоинтов |
-| `markerCookie` | `__framepass_fp` | имя маркер-куки |
-| `markerMaxAge` | 30 дней | срок жизни маркера, секунды |
-| `storageAccessHeaders` | `true` | поддержка Storage Access Headers (Chrome) |
-| `visitPage` | англ. тексты | `{ title, text, button, standalone, lang }` или `(req) => html \| Promise<html>` — см. [Окно первого визита](#окно-первого-визита) |
+| `allowedOrigins` | — | partner sites, as bare origins (`https://shop.example`, no `/` or `*`). **Required** |
+| `embedPaths` | — | pages served into iframes (`'/embed'` matches the page and everything under `/embed/`, or a `RegExp`); they get `frame-ancestors` from `allowedOrigins` |
+| `basePath` | `/__framepass` | prefix of the service endpoints |
+| `markerCookie` | `__framepass_fp` | marker cookie name |
+| `markerMaxAge` | 30 days | marker lifetime, seconds |
+| `storageAccessHeaders` | `true` | Storage Access Headers support (Chrome) |
+| `visitPage` | English texts | `{ title, text, button, standalone, lang }` or `(req) => html \| Promise<html>`, see [the popup](#the-first-party-visit-popup) |
 
-Что делает middleware:
+What the middleware does:
 - `GET {basePath}/probe` → `{ "access": boolean }`;
-- `GET {basePath}/visit` — страница первого визита;
-- `GET {basePath}/visit.js` — её скрипт;
-- ставит маркер-куку при прямом заходе на сайт;
-- ставит `Content-Security-Policy: frame-ancestors` на `embedPaths` и `frame-ancestors 'none'` на страницу первого визита
-  (если CSP уже задан и в нём есть `frame-ancestors`, он не меняется);
-- Storage Access Headers: на `Sec-Fetch-Storage-Access: inactive` от разрешённого сайта
-  отвечает `Activate-Storage-Access: retry`, при загрузке iframe с `active` — `load`.
+- `GET {basePath}/visit`: the first-party visit page;
+- `GET {basePath}/visit.js`: its script;
+- sets the marker cookie on direct visits to the site;
+- sets `Content-Security-Policy: frame-ancestors` on `embedPaths` and `frame-ancestors 'none'` on the visit page
+  (an existing CSP that already has `frame-ancestors` is left alone);
+- Storage Access Headers: answers `Sec-Fetch-Storage-Access: inactive` from an allowed site with
+  `Activate-Storage-Access: retry`, and an iframe load with `active` with `load`.
 
-Хелперы: `serializeCookie(name, value, options)`, `appendSetCookie(res, cookie)`, `parseCookies(header)`,
+Helpers: `serializeCookie(name, value, options)`, `appendSetCookie(res, cookie)`, `parseCookies(header)`,
 `injectScript(html, src)`, `frameAncestors(origins)`.
-`serializeCookie` проверяет имя, `path` и `domain` и бросает `TypeError`, если там `;`, пробелы или управляющие символы.
-`serializeCookie` по умолчанию ставит `Path=/; Secure; SameSite=None`, а с `{ partitioned: true }` — ещё и `Partitioned` ([CHIPS](https://developer.mozilla.org/en-US/docs/Web/Privacy/Privacy_sandbox/Partitioned_cookies)).
+`serializeCookie` validates the name, `path` and `domain` and throws a `TypeError` on `;`, spaces or control characters.
+By default it sets `Path=/; Secure; SameSite=None`, plus `Partitioned` with `{ partitioned: true }` ([CHIPS](https://developer.mozilla.org/en-US/docs/Web/Privacy/Privacy_sandbox/Partitioned_cookies)).
 
 ### `framepass/visit`
 
 | | |
 |---|---|
-| `isVisitPopup()` | `true`, если страницу открыл виджет как окно первого визита |
-| `notifyVisited({ close = true })` | сообщить виджету о визите (только на ваш origin) и закрыть окно; `false`, если окно открыто не виджетом |
+| `isVisitPopup()` | `true` when the widget opened this page as its first-party visit popup |
+| `notifyVisited({ close = true })` | tell the widget about the visit (to your origin only) and close the popup; `false` when the page was not opened by the widget |
 
-## Поддержка браузеров
+## Browser support
 
 | | Chrome / Edge | Firefox | Safari |
 |---|---|---|---|
 | Storage Access API | ✓ | ✓ | ✓ |
-| Тихая повторная активация | ✓ | — | — |
-| Неразделённое хранилище (`unpartitioned`) | ✓ | — | — |
+| Silent re-activation | ✓ | — | — |
+| Unpartitioned storage (`unpartitioned`) | ✓ | — | — |
 | Storage Access Headers | ✓ | — | — |
-| Требует прямого визита на сайт | — | иногда | ✓ |
+| Requires a prior direct visit | — | sometimes | ✓ |
 
-Brave и пользователи со строгими настройками могут отказать в любом случае: это ожидаемо.
+Brave and users with strict settings may refuse anyway; that is expected.
 
-## Если доступа нет
+## When access is not available
 
-- **Состояние нужно только внутри одного сайта-партнёра** (корзина, настройки виджета) — используйте
-  `Partitioned`-куки: `serializeCookie('cart', id, { partitioned: true })`. Разрешение вообще не нужно.
-- **Нужна авторизация** — вход во всплывающем окне на вашем домене, затем передача токена в iframe через `postMessage`.
-- **Есть сервер у партнёра** — выдавайте токен с сервера на сервер и передавайте его в iframe.
-- **SSO** — посмотрите на [FedCM](https://developer.mozilla.org/en-US/docs/Web/API/FedCM_API).
+- **State only matters within one partner site** (a cart, widget settings): use `Partitioned`
+  cookies, `serializeCookie('cart', id, { partitioned: true })`. No permission needed at all.
+- **You need authentication**: sign in through a popup on your domain, then hand a token to the iframe via `postMessage`.
+- **The partner has a backend**: issue a token server-to-server and pass it into the iframe.
+- **SSO**: have a look at [FedCM](https://developer.mozilla.org/en-US/docs/Web/API/FedCM_API).
 
-Не используйте цепочки редиректов для синхронизации идентификаторов: защиты от bounce tracking в браузерах их вычищают.
+Do not use redirect chains to sync identifiers: browsers' bounce-tracking protections purge them.
 
-## Безопасность
+## Security
 
-Пакет без зависимостей и не передаёт данные никуда, кроме вашего сервера. Но выдавая доступ
-к кукам во фрейме на чужом сайте, вы расширяете поверхность атаки. Что framepass делает сам
-и что остаётся на вас:
+The package has no dependencies and sends data nowhere but your own server. Still, granting
+cookie access to a frame on someone else's site widens the attack surface. What framepass
+handles and what is up to you:
 
-**Делает framepass**
-- Запрашивает доступ (в том числе молча) только если сайт-родитель — один из `allowedHosts`.
-  Это проверяется через `location.ancestorOrigins` (Chromium, Safari) или рукопожатие с `framepass/host`.
-  Сайт злоумышленника, встроивший ваш виджет, не сможет обманом добиться разрешения (кликджекинг).
-- `embedPaths` запрещает встраивать страницы виджета на чужих сайтах (`frame-ancestors`),
-  а страницу первого визита — где-либо вообще.
-- Сообщения принимаются только от ожидаемого окна и origin, отправляются только на точный origin.
-  Вызвать можно только явно объявленные методы.
-- Текст ошибок методов не уходит партнёру, если не включён `exposeErrors` и не брошен `PublicError`.
+**framepass handles**
+- Access is requested (silently or not) only when the parent page is one of `allowedHosts`.
+  This is checked with `location.ancestorOrigins` (Chromium, Safari) or the `framepass/host` handshake,
+  so an attacker's site that frames your widget cannot trick the user into granting access (clickjacking).
+- `embedPaths` stops other sites from framing your widget pages (`frame-ancestors`), and the
+  visit page cannot be framed at all.
+- Messages are accepted only from the expected window and origin and sent only to an exact origin.
+  Only explicitly declared methods can be called.
+- Method error messages do not reach the partner unless `exposeErrors` is on or a `PublicError` is thrown.
 
-**Остаётся на вас**
-- **CSRF.** Кука с `SameSite=None` отправляется с запросами с *любого* сайта, если браузер разрешает
-  сторонние куки (например, Chrome в обычном режиме). Не переводите основную сессию сайта на `SameSite=None`:
-  выдайте виджету отдельную куку с минимальными правами. Все изменяющие запросы защищайте проверкой
-  заголовка `Origin` и/или CSRF-токенами.
-- **Минимум данных в методах.** Всё, что вернул метод, получает сайт-партнёр. Отдавайте то, что нужно
-  для отображения (имя, статус), но не токены и не персональные данные сверх необходимого.
-- **Список партнёров.** `allowedHosts` и `allowedOrigins` — граница доверия: только конкретные origin, без шаблонов.
-- **Демо** (`demo/`) — пример для локальной проверки, не основа для продакшена.
+**Up to you**
+- **CSRF.** A `SameSite=None` cookie is sent with requests from *any* site when the browser allows
+  third-party cookies (e.g. Chrome in normal mode). Do not move your main session to `SameSite=None`:
+  give the widget its own cookie with minimal rights, and protect every state-changing request with
+  an `Origin` header check and/or CSRF tokens.
+- **Minimal data in methods.** Whatever a method returns, the partner site receives. Return what the UI
+  needs (a name, a status), never tokens or more personal data than necessary.
+- **The partner list.** `allowedHosts` and `allowedOrigins` are your trust boundary: exact origins only, no wildcards.
+- **The demo** (`demo/`) is for local testing, not a production template.
 
-## Лицензия
+## Contributing
 
-MIT
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+[MIT](LICENSE)

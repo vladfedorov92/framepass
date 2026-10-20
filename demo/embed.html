@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Демо-виджет</title>
+  <title>Demo widget</title>
   <style>
     body { font: 15px/1.5 system-ui, sans-serif; margin: 0; padding: 1rem; background: #fbfaf7; }
     button { font: inherit; padding: .4rem 1rem; cursor: pointer; }
@@ -11,20 +11,20 @@
   </style>
 </head>
 <body>
-  <p>Виджет на <code>__WIDGET_ORIGIN__</code> · состояние: <b id="state">unknown</b></p>
+  <p>Widget on <code>__WIDGET_ORIGIN__</code> · state: <b id="state">unknown</b></p>
   <p id="user" class="muted">…</p>
-  <button id="allow" type="button" hidden>Разрешить доступ</button>
+  <button id="allow" type="button" hidden>Allow access</button>
   <p id="hint" class="muted"></p>
 
   <script type="module">
     import { createEmbed, hasAccess } from '/lib/embed/index.js';
 
     const hints = {
-      'needs-gesture': 'Браузер прячет наши куки. Нажмите кнопку — он спросит разрешение.',
-      'needs-first-party': 'Сначала нужно один раз открыть наш сайт. Кнопка откроет его во всплывающем окне.',
-      'waiting-host': 'Ждём подтверждения от сайта-партнёра; на чужом сайте доступ не запрашивается.',
-      'denied':'Доступ не выдан. Можно попробовать ещё раз.',
-      'unsupported': 'Браузер не поддерживает Storage Access API — нужен запасной вариант (popup + токен).',
+      'needs-gesture': 'The browser hides our cookies. Press the button and it will ask for permission.',
+      'needs-first-party': 'Our site has to be visited once first. The button opens it in a popup.',
+      'waiting-host': 'Waiting for the partner site to confirm itself; access is never requested on other sites.',
+      'denied': 'Access was not granted. You can try again.',
+      'unsupported': 'This browser has no Storage Access API; a fallback is needed (popup + token).',
     };
 
     async function getSession() {
@@ -45,10 +45,10 @@
       document.getElementById('hint').textContent = hints[state] ?? '';
       const { user } = await getSession();
       document.getElementById('user').innerHTML = user
-        ? `Сессия видна: <b>${user.replace(/[<>&"]/g, '')}</b>`
+        ? `Session visible: <b>${user.replace(/[<>&"]/g, '')}</b>`
         : hasAccess(state)
-          ? 'Куки доступны, но вы не вошли. <a href="__WIDGET_ORIGIN__/" target="_blank">Войти на сайте виджета</a>'
-          : 'Сессия не видна из iframe.';
+          ? 'Cookies are available, but you are not signed in. <a href="__WIDGET_ORIGIN__/" target="_blank">Sign in on the widget site</a>'
+          : 'The session is not visible from the iframe.';
     }
 
     embed.attach(document.getElementById('allow'));

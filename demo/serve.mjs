@@ -94,7 +94,7 @@ listen(WIDGET_ORIGIN, async (req, res) => {
 
   return sendFile(res, join(root, 'demo', 'widget-home.html'), {
     ...vars,
-    __USER__: user ? `Вы вошли как <b>${user.replace(/[<>&"]/g, '')}</b>. <a href="/logout">Выйти</a>` : 'Вы не вошли.',
+    __USER__: user ? `Signed in as <b>${user.replace(/[<>&"]/g, '')}</b>. <a href="/logout">Sign out</a>` : 'You are not signed in.',
   });
 });
 
