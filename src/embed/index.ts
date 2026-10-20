@@ -85,8 +85,9 @@ export function createEmbed(options: EmbedOptions, env: EmbedEnv = defaultEnv())
   let storage: StorageAccessHandle | undefined;
   // Set only by a handshake from our parent on an allowed origin.
   let hostOrigin: string | undefined;
-  const ancestorTrusted = isAllowedParent(win, options.allowedHosts);
-  const trusted = () => ancestorTrusted || hostOrigin !== undefined;
+  const ancestors = checkAncestors(win, options.allowedHosts);
+  // A handshake proves only the parent; where the whole chain is visible it has the final word.
+  const trusted = () => ancestors === 'allowed' || (ancestors === 'unknown' && hostOrigin !== undefined);
   let visited = false;
   let checking: Promise<AccessState> | undefined;
 
@@ -272,11 +273,20 @@ export function createEmbed(options: EmbedOptions, env: EmbedEnv = defaultEnv())
   return embed;
 }
 
-/** Chromium and Safari expose the parent's origin synchronously; Firefox relies on the handshake. */
-function isAllowedParent(win: Window, allowedHosts: string[]): boolean {
-  if (win.parent === win) return false;
-  const parent = (win.location as Location & { ancestorOrigins?: DOMStringList }).ancestorOrigins?.[0];
-  return parent !== undefined && allowedHosts.includes(parent);
+/**
+ * Storage access is granted for (our site, top-level site), so every ancestor must be allowed,
+ * not just the parent: an allowed partner page framed by an attacker must not count.
+ * Chromium and Safari list the chain in `ancestorOrigins`; Firefox doesn't, so it falls back
+ * to the parent handshake plus `frame-ancestors`, which browsers check along the whole chain.
+ */
+function checkAncestors(win: Window, allowedHosts: string[]): 'allowed' | 'forbidden' | 'unknown' {
+  if (win.parent === win) return 'forbidden';
+  const list = (win.location as Location & { ancestorOrigins?: DOMStringList }).ancestorOrigins;
+  if (!list || list.length === 0) return 'unknown';
+  const origins = Array.from({ length: list.length }, (_, i) => list[i]);
+  // Chromium masks ancestors as "null" under `referrerpolicy="no-referrer"`.
+  if (origins.some((o) => o !== 'null' && !allowedHosts.includes(o))) return 'forbidden';
+  return origins.includes('null') ? 'unknown' : 'allowed';
 }
 
 function defaultEnv(): EmbedEnv {

@@ -12,7 +12,7 @@ function fakeEnv({ api = true, hasAccess = false, permission = 'prompt', probe =
   const calls = { request: 0, types: [] };
   const window = {
     parent,
-    location: { origin: SELF, ancestorOrigins: ancestor ? [ancestor] : undefined },
+    location: { origin: SELF, ancestorOrigins: ancestor ? [].concat(ancestor) : undefined },
     addEventListener: (_t, fn) => handlers.add(fn),
     removeEventListener: (_t, fn) => handlers.delete(fn),
     open: (url) => opened.push(url),
@@ -100,8 +100,8 @@ test('handshake and RPC only for allowed hosts', async () => {
   assert.equal(results.find((r) => r.id === 2).ok, false);
 });
 
-test('unverified host: no request, no button, until the handshake', async () => {
-  const f = fakeEnv({ ancestor: 'https://evil.example', permission: 'granted' });
+test('no ancestorOrigins (Firefox): no request, no button, until the handshake', async () => {
+  const f = fakeEnv({ ancestor: null, permission: 'granted' });
   const embed = createEmbed({ allowedHosts: [HOST] }, f.env);
   assert.equal(await embed.check(), 'waiting-host');
   assert.equal(f.calls.request, 0, 'no silent re-activation for an unknown page');
@@ -149,4 +149,31 @@ test('method errors are hidden unless public or exposeErrors', async () => {
     await run({ methods: { boom: () => { throw new PublicError('Not logged in'); } } }),
     'Not logged in',
   );
+});
+
+test('an allowed parent framed by a foreign top-level site is never trusted', async () => {
+  const f = fakeEnv({ ancestor: [HOST, 'https://evil.example'], permission: 'granted' });
+  const embed = createEmbed({ allowedHosts: [HOST] }, f.env);
+  assert.equal(await embed.check(), 'waiting-host');
+
+  f.dispatch({ ns: 'framepass', kind: 'hello' });
+  for (let i = 0; i < 5; i++) await tick();
+  assert.equal(embed.state, 'waiting-host');
+  assert.equal(await embed.request(), 'waiting-host');
+  assert.equal(f.calls.request, 0);
+});
+
+test('a fully allowed chain is trusted without a handshake', async () => {
+  const OTHER = 'https://portal.example';
+  const f = fakeEnv({ ancestor: [HOST, OTHER] });
+  assert.equal(await createEmbed({ allowedHosts: [HOST, OTHER] }, f.env).check(), 'needs-gesture');
+});
+
+test('masked ("null") ancestors fall back to the handshake', async () => {
+  const f = fakeEnv({ ancestor: ['null'] });
+  const embed = createEmbed({ allowedHosts: [HOST] }, f.env);
+  assert.equal(await embed.check(), 'waiting-host');
+  f.dispatch({ ns: 'framepass', kind: 'hello' });
+  for (let i = 0; i < 5; i++) await tick();
+  assert.equal(embed.state, 'needs-gesture');
 });

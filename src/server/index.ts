@@ -60,17 +60,24 @@ export function framepass(options: ServerOptions) {
   const allowed = new Set(options.allowedOrigins);
   const sah = options.storageAccessHeaders !== false;
   const ancestors = frameAncestors(options.allowedOrigins);
-  const isEmbedPath = (path: string) =>
-    (options.embedPaths ?? []).some((p) =>
-      typeof p === 'string' ? path === p || path.startsWith(p.endsWith('/') ? p : `${p}/`) : p.test(path),
+  const embedPrefixes = (options.embedPaths ?? []).filter((p): p is string => typeof p === 'string').map(normalizePath);
+  const embedPatterns = (options.embedPaths ?? []).filter((p): p is RegExp => p instanceof RegExp);
+  // Routers are lenient (Express ignores case, decodes, tolerates `//`), so match the
+  // normalised path too: protecting a page too many is harmless, one too few is not.
+  const isEmbedPath = (raw: string) => {
+    const path = normalizePath(raw);
+    return (
+      embedPrefixes.some((p) => path === p || path.startsWith(p.endsWith('/') ? p : `${p}/`)) ||
+      embedPatterns.some((re) => re.test(raw) || re.test(path))
     );
+  };
 
   return function handle(req: IncomingMessage, res: ServerResponse, next?: Next): boolean {
     const path = (req.url ?? '/').split('?')[0];
     const dest = header(req, 'sec-fetch-dest');
     const hasMarker = parseCookies(header(req, 'cookie'))[marker] === '1';
 
-    if (isEmbedPath(path)) addCsp(res, ancestors);
+    if (isEmbedPath(path)) enforceCsp(res, ancestors);
 
     if (sah) {
       appendVary(res, 'Sec-Fetch-Storage-Access');
@@ -111,12 +118,12 @@ export function framepass(options: ServerOptions) {
 
     if (req.method === 'GET' && path === `${base}/visit`) {
       const page = options.visitPage;
+      // It is a top-level page by definition; framing it only enables clickjacking.
+      enforceCsp(res, "frame-ancestors 'none'");
       const send = (html: string) => {
         res.statusCode = 200;
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Cache-Control', 'no-store');
-        // It is a top-level page by definition; framing it only enables clickjacking.
-        addCsp(res, "frame-ancestors 'none'");
         res.end(html);
       };
       if (typeof page !== 'function') {
@@ -151,10 +158,48 @@ export function frameAncestors(origins: string[]): string {
   return `frame-ancestors ${origins.length ? origins.join(' ') : "'none'"}`;
 }
 
-function addCsp(res: ServerResponse, directive: string) {
-  const prev = res.getHeader('Content-Security-Policy');
-  if (prev && /frame-ancestors/i.test(String(prev))) return;
-  res.setHeader('Content-Security-Policy', prev ? `${String(prev)}; ${directive}` : directive);
+const CSP = 'Content-Security-Policy';
+const enforced = new WeakSet<ServerResponse>();
+
+/**
+ * Adds `policy` as a separate CSP when the headers are actually sent, so code running later
+ * cannot drop it with its own `setHeader`. Browsers enforce every policy they receive, so an
+ * extra one can only tighten whatever else the app sends, never loosen it.
+ */
+function enforceCsp(res: ServerResponse, policy: string) {
+  if (enforced.has(res)) return;
+  enforced.add(res);
+  const writeHead = res.writeHead;
+  // Node routes implicit headers (first write/end) through writeHead as well.
+  res.writeHead = function (this: ServerResponse, ...args: any[]) {
+    const headersArg = args.find((a, i) => i > 0 && a && typeof a === 'object' && !Array.isArray(a));
+    const key = headersArg && Object.keys(headersArg).find((k) => k.toLowerCase() === CSP.toLowerCase());
+    if (key) {
+      // Headers passed to writeHead override setHeader; fold ours in there.
+      headersArg[key] = [...toList(headersArg[key]), policy];
+    } else {
+      this.setHeader(CSP, [...toList(this.getHeader(CSP)), policy]);
+    }
+    return (writeHead as (...a: any[]) => ServerResponse).apply(this, args);
+  } as ServerResponse['writeHead'];
+}
+
+function toList(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  return Array.isArray(value) ? value.map(String) : [String(value)];
+}
+
+/** Lower-cased, percent-decoded, with `\` and repeated slashes collapsed to one `/`. */
+function normalizePath(path: string): string {
+  let p = path;
+  for (let i = 0; i < 3 && /%[0-9a-f]{2}/i.test(p); i++) {
+    try {
+      p = decodeURIComponent(p);
+    } catch {
+      break;
+    }
+  }
+  return p.replace(/[\\/]+/g, '/').toLowerCase();
 }
 
 function assertOrigin(origin: string) {
