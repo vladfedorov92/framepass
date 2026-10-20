@@ -14,6 +14,7 @@
 <body>
   <h1>Сайт-партнёр <small><code>__HOST_ORIGIN__</code></small></h1>
   <p>Ниже — виджет с <code>__WIDGET_ORIGIN__</code>. Состояние доступа: <b id="state">unknown</b></p>
+  <p>Окно первого визита: <a href="/">своя страница framepass</a> · <a href="/?visit=login">страница входа виджета</a></p>
   <div id="slot"></div>
   <p><button id="who" type="button">Спросить у виджета: кто я?</button></p>
   <pre id="out">—</pre>
@@ -21,7 +22,9 @@
   <script type="module">
     import { mountEmbed } from '/lib/host/index.js';
 
-    const embed = mountEmbed('#slot', { src: '__WIDGET_ORIGIN__/embed', title: 'Демо-виджет' });
+    // ?visit=login: the first-party popup is the widget's login page instead of /__framepass/visit
+    const visit = new URLSearchParams(location.search).get('visit') === 'login' ? '?visit=login' : '';
+    const embed = mountEmbed('#slot', { src: `__WIDGET_ORIGIN__/embed${visit}`, title: 'Демо-виджет' });
     const show = (s) => (document.getElementById('state').textContent = s);
     embed.ready.then(show);
     embed.on('state', show);

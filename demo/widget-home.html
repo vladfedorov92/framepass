@@ -14,6 +14,18 @@
     <input name="name" placeholder="Имя" required>
     <button>Войти</button>
   </form>
+  <p id="back" hidden><button type="button">Вернуться к виджету</button></p>
   <p>Потом откройте <a href="__HOST_ORIGIN__/">сайт-партнёр</a> и проверьте, видит ли виджет сессию.</p>
+
+  <script type="module">
+    import { isVisitPopup, notifyVisited } from '/lib/visit/index.js';
+
+    // Opened by the widget as its first-party popup: after login, report the visit and close.
+    if (isVisitPopup()) {
+      const back = document.getElementById('back');
+      back.hidden = false;
+      back.querySelector('button').addEventListener('click', () => notifyVisited());
+    }
+  </script>
 </body>
 </html>

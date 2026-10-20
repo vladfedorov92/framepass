@@ -20,6 +20,10 @@
     "./server": {
       "types": "./dist/server/index.d.ts",
       "default": "./dist/server/index.js"
+    },
+    "./visit": {
+      "types": "./dist/visit/index.d.ts",
+      "default": "./dist/visit/index.js"
     }
   },
   "files": [

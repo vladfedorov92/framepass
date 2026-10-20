@@ -51,9 +51,10 @@ listen(HOST_ORIGIN, (req, res) => {
 });
 
 // --- widget site -----------------------------------------------------------
+// Way 1: a branded visit page; framepass injects its script, the button only needs data-framepass-continue.
 const fp = framepass({
   allowedOrigins: [HOST_ORIGIN],
-  visitPage: { lang: 'ru', title: 'Разрешить доступ', text: 'Нажмите, чтобы виджет заработал на сайте партнёра.', button: 'Продолжить' },
+  visitPage: () => readFile(join(root, 'demo', 'visit.html'), 'utf8'),
 });
 
 listen(WIDGET_ORIGIN, async (req, res) => {

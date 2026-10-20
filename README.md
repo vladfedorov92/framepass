@@ -57,6 +57,7 @@ npm install github:vladfedorov92/framepass
 | `framepass/embed` | внутри iframe, на вашем домене | проверяет и запрашивает доступ, управляет кнопкой, отвечает на вызовы |
 | `framepass/host` | на сайте-партнёре | вставляет iframe и даёт вызывать его методы |
 | `framepass/server` | на сервере вашего домена (Node) | служебные эндпоинты, заголовки, хелперы для кук |
+| `framepass/visit` | на любой странице вашего сайта | `notifyVisited()` — сделать, например, страницу входа окном первого визита |
 
 `framepass/core` содержит общие типы и утилиты, если они понадобятся напрямую.
 
@@ -148,6 +149,73 @@ unknown ──────────────┬─► not-needed          
 Чтобы точно знать, доступны ли настоящие куки, сервер ставит маркер-куку при прямом
 визите на ваш сайт. Iframe спрашивает у сервера, долетает ли маркер.
 
+### Что видит пользователь
+
+framepass не рисует интерфейс в iframe и на сайте-партнёре: кнопку и подсказки делаете вы.
+Пользователь увидит:
+
+1. **Вашу кнопку** внутри виджета — только когда нужен клик.
+2. **Системный диалог браузера** с вопросом, разрешить ли куки. Его рисует браузер, и изменить его нельзя.
+3. **Окно первого визита** — только в Safari и Firefox и только если пользователь ещё не бывал на вашем сайте.
+
+### Окно первого визита
+
+По умолчанию это простая страница `/__framepass/visit` с заголовком, текстом и кнопкой.
+Её можно заменить тремя способами.
+
+**Свои тексты:**
+
+```js
+framepass({
+  allowedOrigins: [...],
+  visitPage: { lang: 'ru', title: 'Подключить виджет', text: '…', button: 'Продолжить', standalone: 'Готово' },
+});
+```
+
+**Своя страница.** Функция возвращает HTML (можно асинхронно). framepass сам подключит
+`/__framepass/visit.js`, а кнопке достаточно атрибута `data-framepass-continue`:
+
+```js
+framepass({
+  allowedOrigins: [...],
+  visitPage: (req) => renderTemplate('framepass-visit', { locale: req.headers['accept-language'] }),
+});
+```
+
+```html
+<button data-framepass-continue data-framepass-popup>Продолжить</button>
+<p data-framepass-standalone hidden>Готово, вкладку можно закрыть.</p>
+```
+
+| Атрибут | |
+|---|---|
+| `data-framepass-continue` | клик сообщает виджету о визите и закрывает окно |
+| `data-framepass-popup` | виден, только если страница открыта виджетом |
+| `data-framepass-standalone` | виден, только если страницу открыли напрямую |
+
+Скрипт подключается внешним файлом, поэтому работает и со строгой CSP (`script-src 'self'`).
+
+**Любая страница вашего сайта**, например страница входа. Пользователь входит и тем же действием
+выполняет условие первого визита:
+
+```js
+// в iframe
+createEmbed({ allowedHosts: [...], firstPartyUrl: '/login?popup=1' });
+```
+
+```js
+// на странице /login, после успешного входа
+import { isVisitPopup, notifyVisited } from 'framepass/visit';
+
+if (isVisitPopup()) {
+  backButton.hidden = false;
+  backButton.onclick = () => notifyVisited();   // сообщит виджету и закроет окно
+}
+```
+
+Safari засчитывает визит только с действием пользователя: клик или отправка формы подходят,
+простое открытие страницы — нет.
+
 ## API
 
 ### `createEmbed(options)` — `framepass/embed`
@@ -210,17 +278,26 @@ unknown ──────────────┬─► not-needed          
 | `markerCookie` | `__framepass_fp` | имя маркер-куки |
 | `markerMaxAge` | 30 дней | срок жизни маркера, секунды |
 | `storageAccessHeaders` | `true` | поддержка Storage Access Headers (Chrome) |
-| `visitPage` | англ. тексты | `{ title, text, button, lang }` страницы первого визита |
+| `visitPage` | англ. тексты | `{ title, text, button, standalone, lang }` или `(req) => html \| Promise<html>` — см. [Окно первого визита](#окно-первого-визита) |
 
 Что делает middleware:
 - `GET {basePath}/probe` → `{ "access": boolean }`;
 - `GET {basePath}/visit` — страница первого визита;
+- `GET {basePath}/visit.js` — её скрипт;
 - ставит маркер-куку при прямом заходе на сайт;
 - Storage Access Headers: на `Sec-Fetch-Storage-Access: inactive` от разрешённого сайта
   отвечает `Activate-Storage-Access: retry`, при загрузке iframe с `active` — `load`.
 
-Хелперы: `serializeCookie(name, value, options)`, `appendSetCookie(res, cookie)`, `parseCookies(header)`.
+Хелперы: `serializeCookie(name, value, options)`, `appendSetCookie(res, cookie)`, `parseCookies(header)`,
+`injectScript(html, src)`.
 `serializeCookie` по умолчанию ставит `Path=/; Secure; SameSite=None`, а с `{ partitioned: true }` — ещё и `Partitioned` ([CHIPS](https://developer.mozilla.org/en-US/docs/Web/Privacy/Privacy_sandbox/Partitioned_cookies)).
+
+### `framepass/visit`
+
+| | |
+|---|---|
+| `isVisitPopup()` | `true`, если страницу открыл виджет как окно первого визита |
+| `notifyVisited({ close = true })` | сообщить виджету о визите (только на ваш origin) и закрыть окно; `false`, если окно открыто не виджетом |
 
 ## Поддержка браузеров
 
@@ -265,6 +342,7 @@ src/core     общие типы, протокол сообщений, опре�
 src/embed    SDK для iframe
 src/host     SDK для сайта-партнёра
 src/server   Node middleware
+src/visit    хелпер для страниц первого визита
 test/        тесты
 demo/        демо-стенд
 ```
@@ -277,6 +355,7 @@ npm run demo
 
 1. `http://localhost:4000` — сайт виджета, войдите на нём.
 2. `http://127.0.0.1:3000` — сайт-партнёр с iframe виджета.
+3. `http://127.0.0.1:3000/?visit=login` — то же, но окном первого визита служит страница входа виджета.
 
 Это разные сайты, поэтому куки виджета считаются сторонними. Удобнее всего проверять в
 Chrome Incognito и Firefox. Safari не принимает Secure-куки по http: выпустите сертификаты

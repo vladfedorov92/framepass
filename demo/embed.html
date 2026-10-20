@@ -31,8 +31,11 @@
       return res.json();
     }
 
+    const loginAsVisit = new URLSearchParams(location.search).get('visit') === 'login';
     const embed = createEmbed({
       allowedHosts: ['__HOST_ORIGIN__'],
+      // Way 2: any page of ours can serve as the first-party visit if it calls notifyVisited()
+      firstPartyUrl: loginAsVisit ? '/?popup=1' : undefined,
       methods: { getSession: (_params, ctx) => getSession().then((s) => ({ ...s, access: ctx.state })) },
     });
 

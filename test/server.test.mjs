@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { framepass, serializeCookie, parseCookies } from '../dist/server/index.js';
+import { framepass, serializeCookie, parseCookies, injectScript } from '../dist/server/index.js';
 
 async function withServer(options, fn) {
   const mw = framepass(options);
@@ -65,12 +65,47 @@ test('active storage access on iframe load keeps it active', async () => {
   });
 });
 
-test('visit page escapes texts and posts back to opener', async () => {
+test('built-in visit page escapes texts and loads the visit script', async () => {
   await withServer({ allowedOrigins: [], visitPage: { title: '<x>' } }, async (url) => {
     const html = await (await fetch(`${url}/__framepass/visit`)).text();
     assert.ok(html.includes('&#60;x&#62;'));
-    assert.ok(html.includes("kind: 'visited'"));
+    assert.ok(html.includes('<script src="/__framepass/visit.js"></script>'));
+    assert.ok(html.includes('data-framepass-continue'));
   });
+});
+
+test('visit script is served as external JS', async () => {
+  await withServer({ allowedOrigins: [] }, async (url) => {
+    const res = await fetch(`${url}/__framepass/visit.js`);
+    assert.match(res.headers.get('content-type'), /^text\/javascript/);
+    const js = await res.text();
+    assert.ok(js.includes("kind: 'visited'"));
+    assert.ok(js.includes('[data-framepass-continue]'));
+  });
+});
+
+test('custom visit page gets the script injected before </body>', async () => {
+  const visitPage = async (req) => `<html><body><h1>Brand ${req.url}</h1><a data-framepass-continue>Go</a></BODY></html>`;
+  await withServer({ allowedOrigins: [], basePath: '/fp', visitPage }, async (url) => {
+    const html = await (await fetch(`${url}/fp/visit`)).text();
+    assert.equal(
+      html,
+      '<html><body><h1>Brand /fp/visit</h1><a data-framepass-continue>Go</a><script src="/fp/visit.js"></script></BODY></html>',
+    );
+  });
+});
+
+test('failing custom visit page answers 500', async () => {
+  const visitPage = () => {
+    throw new Error('boom');
+  };
+  await withServer({ allowedOrigins: [], visitPage }, async (url) => {
+    assert.equal((await fetch(`${url}/__framepass/visit`)).status, 500);
+  });
+});
+
+test('injectScript appends when there is no body', () => {
+  assert.equal(injectScript('<p>hi</p>', '/v.js'), '<p>hi</p><script src="/v.js"></script>');
 });
 
 test('cookie helpers', () => {
