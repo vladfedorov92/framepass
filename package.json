@@ -1,6 +1,6 @@
 {
   "name": "framepass",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Storage Access API made practical: cross-site cookie access for embedded iframes, with host bridge and server middleware.",
   "type": "module",
   "license": "MIT",
