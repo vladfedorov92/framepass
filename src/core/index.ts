@@ -7,6 +7,8 @@
  * - `needs-gesture`      a click inside the iframe is required (use `attach(button)`)
  * - `needs-first-party`  browser wants a prior top-level visit to our site (Safari, Firefox);
  *                        the next click opens a popup on our origin
+ * - `waiting-host`       access needs asking, but the embedding page is not verified yet as one
+ *                        of `allowedHosts`; nothing is requested until it is (clickjacking guard)
  * - `denied`             the user or the browser refused
  * - `unsupported`        no Storage Access API and no cookie access: use a fallback
  */
@@ -16,6 +18,7 @@ export type AccessState =
   | 'granted'
   | 'needs-gesture'
   | 'needs-first-party'
+  | 'waiting-host'
   | 'denied'
   | 'unsupported';
 

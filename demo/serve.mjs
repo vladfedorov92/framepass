@@ -54,6 +54,7 @@ listen(HOST_ORIGIN, (req, res) => {
 // Way 1: a branded visit page; framepass injects its script, the button only needs data-framepass-continue.
 const fp = framepass({
   allowedOrigins: [HOST_ORIGIN],
+  embedPaths: ['/embed'],
   visitPage: () => readFile(join(root, 'demo', 'visit.html'), 'utf8'),
 });
 
@@ -65,7 +66,6 @@ listen(WIDGET_ORIGIN, async (req, res) => {
   if (path.startsWith('/lib/')) return serveLib(req, res);
 
   if (path === '/embed') {
-    res.setHeader('Content-Security-Policy', `frame-ancestors ${HOST_ORIGIN}`);
     return sendFile(res, join(root, 'demo', 'embed.html'), vars);
   }
 

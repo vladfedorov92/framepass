@@ -72,18 +72,22 @@ import { framepass, serializeCookie } from 'framepass/server';
 
 const app = express();
 
-app.use(framepass({ allowedOrigins: ['https://shop.example'] }));
+app.use(framepass({
+  allowedOrigins: ['https://shop.example'],
+  embedPaths: ['/embed'],   // только партнёры смогут встроить эти страницы
+}));
 
 app.post('/login', (req, res) => {
-  // сессионная кука должна быть SameSite=None; Secure — хелпер ставит это по умолчанию
-  res.setHeader('Set-Cookie', serializeCookie('session', createToken(req), { httpOnly: true }));
+  // Основная сессия сайта остаётся SameSite=Lax. Для виджета — отдельная кука
+  // с ограниченными правами: только она SameSite=None (см. «Безопасность»).
+  res.setHeader('Set-Cookie', [
+    serializeCookie('session', createToken(req), { httpOnly: true, sameSite: 'lax' }),
+    serializeCookie('widget_session', createWidgetToken(req), { httpOnly: true }),
+  ]);
   res.redirect('/');
 });
 
-app.get('/embed', (req, res) => {
-  res.setHeader('Content-Security-Policy', 'frame-ancestors https://shop.example');
-  res.sendFile('embed.html', { root: 'public' });
-});
+app.get('/embed', (req, res) => res.sendFile('embed.html', { root: 'public' }));
 ```
 
 Middleware работает и с голым `http.createServer`. Без `next` он возвращает `true`, если сам ответил на запрос:
@@ -221,8 +225,9 @@ Safari засчитывает визит только с действием по
 
 | Опция | Тип | По умолчанию | |
 |---|---|---|---|
-| `allowedHosts` | `string[]` | — | origin'ы, которым можно встраивать iframe и вызывать методы. **Обязательно** |
+| `allowedHosts` | `string[]` | — | origin'ы, которым можно встраивать iframe и вызывать методы. Доступ запрашивается только на этих сайтах. **Обязательно** |
 | `methods` | `Record<string, (params, ctx) => any>` | `{}` | методы для `widget.call()`; `ctx = { state, storage, origin }` |
+| `exposeErrors` | `boolean` | `false` | отдавать сайту-партнёру настоящий текст ошибок методов |
 | `unpartitioned` | `StorageType[]` | — | запросить неразделённые `localStorage`, `indexedDB` и т. п. (только Chromium) |
 | `probeUrl` | `string \| null` | `/__framepass/probe` | эндпоинт проверки кук |
 | `firstPartyUrl` | `string \| null` | `/__framepass/visit` | страница первого визита; `null` отключает всплывающее окно |
@@ -241,6 +246,21 @@ Safari засчитывает визит только с действием по
 | `on('change', fn)` | подписка на смену состояния; возвращает отписку |
 | `destroy()` | снять обработчики |
 
+Если метод бросает ошибку, партнёр получает только `framepass: "<метод>" failed`. Чтобы передать
+понятное сообщение, бросайте `PublicError`:
+
+```js
+import { PublicError } from 'framepass/embed';
+
+methods: {
+  getSession: async () => {
+    const res = await fetch('/api/me', { credentials: 'include' });
+    if (res.status === 401) throw new PublicError('Not logged in');
+    return res.json();
+  },
+}
+```
+
 ### Состояния
 
 | Состояние | Что значит | Что делать |
@@ -250,6 +270,7 @@ Safari засчитывает визит только с действием по
 | `granted` | доступ получен | ничего |
 | `needs-gesture` | нужен клик в iframe | показать кнопку (`attach` делает это сам) |
 | `needs-first-party` | нужен визит на ваш сайт | следующий клик откроет всплывающее окно |
+| `waiting-host` | нужен запрос, но сайт-родитель ещё не подтверждён как один из `allowedHosts` | на сайте-партнёре подключите `framepass/host`; на чужом сайте так и останется |
 | `denied` | отказ | можно предложить ещё раз или [запасной путь](#если-доступа-нет) |
 | `unsupported` | API нет, куки недоступны | [запасной путь](#если-доступа-нет) |
 
@@ -272,7 +293,8 @@ Safari засчитывает визит только с действием по
 
 | Опция | По умолчанию | |
 |---|---|---|
-| `allowedOrigins` | — | сайты-партнёры. **Обязательно** |
+| `allowedOrigins` | — | сайты-партнёры, строго в виде origin (`https://shop.example`, без `/` и `*`). **Обязательно** |
+| `embedPaths` | — | страницы для iframe (`'/embed'` — сама страница и всё под `/embed/`, или `RegExp`); получат `frame-ancestors` по `allowedOrigins` |
 | `basePath` | `/__framepass` | префикс служебных эндпоинтов |
 | `markerCookie` | `__framepass_fp` | имя маркер-куки |
 | `markerMaxAge` | 30 дней | срок жизни маркера, секунды |
@@ -284,11 +306,14 @@ Safari засчитывает визит только с действием по
 - `GET {basePath}/visit` — страница первого визита;
 - `GET {basePath}/visit.js` — её скрипт;
 - ставит маркер-куку при прямом заходе на сайт;
+- ставит `Content-Security-Policy: frame-ancestors` на `embedPaths` и `frame-ancestors 'none'` на страницу первого визита
+  (если CSP уже задан и в нём есть `frame-ancestors`, он не меняется);
 - Storage Access Headers: на `Sec-Fetch-Storage-Access: inactive` от разрешённого сайта
   отвечает `Activate-Storage-Access: retry`, при загрузке iframe с `active` — `load`.
 
 Хелперы: `serializeCookie(name, value, options)`, `appendSetCookie(res, cookie)`, `parseCookies(header)`,
-`injectScript(html, src)`.
+`injectScript(html, src)`, `frameAncestors(origins)`.
+`serializeCookie` проверяет имя, `path` и `domain` и бросает `TypeError`, если там `;`, пробелы или управляющие символы.
 `serializeCookie` по умолчанию ставит `Path=/; Secure; SameSite=None`, а с `{ partitioned: true }` — ещё и `Partitioned` ([CHIPS](https://developer.mozilla.org/en-US/docs/Web/Privacy/Privacy_sandbox/Partitioned_cookies)).
 
 ### `framepass/visit`
@@ -319,6 +344,32 @@ Brave и пользователи со строгими настройками �
 - **SSO** — посмотрите на [FedCM](https://developer.mozilla.org/en-US/docs/Web/API/FedCM_API).
 
 Не используйте цепочки редиректов для синхронизации идентификаторов: защиты от bounce tracking в браузерах их вычищают.
+
+## Безопасность
+
+Пакет без зависимостей и не передаёт данные никуда, кроме вашего сервера. Но выдавая доступ
+к кукам во фрейме на чужом сайте, вы расширяете поверхность атаки. Что framepass делает сам
+и что остаётся на вас:
+
+**Делает framepass**
+- Запрашивает доступ (в том числе молча) только если сайт-родитель — один из `allowedHosts`.
+  Это проверяется через `location.ancestorOrigins` (Chromium, Safari) или рукопожатие с `framepass/host`.
+  Сайт злоумышленника, встроивший ваш виджет, не сможет обманом добиться разрешения (кликджекинг).
+- `embedPaths` запрещает встраивать страницы виджета на чужих сайтах (`frame-ancestors`),
+  а страницу первого визита — где-либо вообще.
+- Сообщения принимаются только от ожидаемого окна и origin, отправляются только на точный origin.
+  Вызвать можно только явно объявленные методы.
+- Текст ошибок методов не уходит партнёру, если не включён `exposeErrors` и не брошен `PublicError`.
+
+**Остаётся на вас**
+- **CSRF.** Кука с `SameSite=None` отправляется с запросами с *любого* сайта, если браузер разрешает
+  сторонние куки (например, Chrome в обычном режиме). Не переводите основную сессию сайта на `SameSite=None`:
+  выдайте виджету отдельную куку с минимальными правами. Все изменяющие запросы защищайте проверкой
+  заголовка `Origin` и/или CSRF-токенами.
+- **Минимум данных в методах.** Всё, что вернул метод, получает сайт-партнёр. Отдавайте то, что нужно
+  для отображения (имя, статус), но не токены и не персональные данные сверх необходимого.
+- **Список партнёров.** `allowedHosts` и `allowedOrigins` — граница доверия: только конкретные origin, без шаблонов.
+- **Демо** (`demo/`) — пример для локальной проверки, не основа для продакшена.
 
 ## Лицензия
 

@@ -2,8 +2,14 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { DEFAULT_BASE_PATH, NS } from '../core/index.js';
 
 export interface ServerOptions {
-  /** Origins allowed to embed us; used for Storage Access Headers. */
+  /** Origins allowed to embed us, e.g. `['https://shop.example']`. */
   allowedOrigins: string[];
+  /**
+   * Pages served into partner iframes. They get `Content-Security-Policy: frame-ancestors`
+   * limited to `allowedOrigins`, so other sites cannot frame (and clickjack) them.
+   * A string matches the path exactly or as a `prefix/`.
+   */
+  embedPaths?: Array<string | RegExp>;
   /** Prefix for the probe and visit endpoints (default `/__framepass`). */
   basePath?: string;
   /** Cookie set on top-level visits; its presence in a frame proves unpartitioned access. */
@@ -50,13 +56,21 @@ export function framepass(options: ServerOptions) {
   const base = (options.basePath ?? DEFAULT_BASE_PATH).replace(/\/$/, '');
   const marker = options.markerCookie ?? '__framepass_fp';
   const markerMaxAge = options.markerMaxAge ?? 60 * 60 * 24 * 30;
+  for (const origin of options.allowedOrigins) assertOrigin(origin);
   const allowed = new Set(options.allowedOrigins);
   const sah = options.storageAccessHeaders !== false;
+  const ancestors = frameAncestors(options.allowedOrigins);
+  const isEmbedPath = (path: string) =>
+    (options.embedPaths ?? []).some((p) =>
+      typeof p === 'string' ? path === p || path.startsWith(p.endsWith('/') ? p : `${p}/`) : p.test(path),
+    );
 
   return function handle(req: IncomingMessage, res: ServerResponse, next?: Next): boolean {
     const path = (req.url ?? '/').split('?')[0];
     const dest = header(req, 'sec-fetch-dest');
     const hasMarker = parseCookies(header(req, 'cookie'))[marker] === '1';
+
+    if (isEmbedPath(path)) addCsp(res, ancestors);
 
     if (sah) {
       appendVary(res, 'Sec-Fetch-Storage-Access');
@@ -101,6 +115,8 @@ export function framepass(options: ServerOptions) {
         res.statusCode = 200;
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Cache-Control', 'no-store');
+        // It is a top-level page by definition; framing it only enables clickjacking.
+        addCsp(res, "frame-ancestors 'none'");
         res.end(html);
       };
       if (typeof page !== 'function') {
@@ -129,7 +145,43 @@ function done(next: Next | undefined, handled: boolean): boolean {
   return handled;
 }
 
+/** `frame-ancestors` directive allowing only the given origins. */
+export function frameAncestors(origins: string[]): string {
+  origins.forEach(assertOrigin);
+  return `frame-ancestors ${origins.length ? origins.join(' ') : "'none'"}`;
+}
+
+function addCsp(res: ServerResponse, directive: string) {
+  const prev = res.getHeader('Content-Security-Policy');
+  if (prev && /frame-ancestors/i.test(String(prev))) return;
+  res.setHeader('Content-Security-Policy', prev ? `${String(prev)}; ${directive}` : directive);
+}
+
+function assertOrigin(origin: string) {
+  let parsed: URL | undefined;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    // reported below
+  }
+  if (!parsed || parsed.origin !== origin || parsed.origin === 'null') {
+    throw new TypeError(`framepass: "${origin}" is not an origin like https://shop.example`);
+  }
+}
+
+// RFC 6265: cookie names are tokens; attribute values may not hold ';', spaces or controls.
+const COOKIE_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+const COOKIE_ATTR = /^[\x21-\x3A\x3C-\x7E]+$/;
+
 export function serializeCookie(name: string, value: string, options: CookieOptions = {}): string {
+  if (!COOKIE_NAME.test(name)) throw new TypeError(`framepass: invalid cookie name "${name}"`);
+  for (const key of ['path', 'domain'] as const) {
+    const v = options[key];
+    if (v !== undefined && !COOKIE_ATTR.test(v)) throw new TypeError(`framepass: invalid cookie ${key} "${v}"`);
+  }
+  if (options.maxAge !== undefined && !Number.isFinite(options.maxAge)) {
+    throw new TypeError('framepass: cookie maxAge must be a finite number');
+  }
   const sameSite = options.sameSite ?? 'none';
   const parts = [`${name}=${encodeURIComponent(value)}`, `Path=${options.path ?? '/'}`];
   if (options.maxAge !== undefined) parts.push(`Max-Age=${Math.floor(options.maxAge)}`);

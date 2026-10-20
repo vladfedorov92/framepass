@@ -20,9 +20,23 @@ export interface MethodContext {
 
 export type Methods = Record<string, (params: any, ctx: MethodContext) => unknown>;
 
+/**
+ * Throw it from a method to send its message to the host page as is.
+ * Other errors reach the host as a generic message unless `exposeErrors` is on.
+ */
+export class PublicError extends Error {
+  override name = 'PublicError';
+}
+
 export interface EmbedOptions {
-  /** Origins allowed to embed this frame and call its methods, e.g. `['https://shop.example']`. */
+  /**
+   * Origins allowed to embed this frame and call its methods, e.g. `['https://shop.example']`.
+   * Storage access is only requested once the embedding page is verified as one of them:
+   * by `location.ancestorOrigins` where available, otherwise by the `framepass/host` handshake.
+   */
   allowedHosts: string[];
+  /** Send real error messages of failed methods to the host (default false). */
+  exposeErrors?: boolean;
   /** Endpoint served by `framepass/server`; tells whether first-party cookies reach us. */
   probeUrl?: string | null;
   /** Page served by `framepass/server` that records a first-party visit; `null` disables the popup step. */
@@ -57,6 +71,7 @@ export interface EmbedEnv {
   fetch: typeof fetch;
 }
 
+// `waiting-host` is deliberately absent: no button until the host is verified.
 const ACTIONABLE: AccessState[] = ['needs-gesture', 'needs-first-party', 'denied'];
 
 export function createEmbed(options: EmbedOptions, env: EmbedEnv = defaultEnv()): Embed {
@@ -68,7 +83,10 @@ export function createEmbed(options: EmbedOptions, env: EmbedEnv = defaultEnv())
 
   let state: AccessState = 'unknown';
   let storage: StorageAccessHandle | undefined;
+  // Set only by a handshake from our parent on an allowed origin.
   let hostOrigin: string | undefined;
+  const ancestorTrusted = isAllowedParent(win, options.allowedHosts);
+  const trusted = () => ancestorTrusted || hostOrigin !== undefined;
   let visited = false;
   let checking: Promise<AccessState> | undefined;
 
@@ -125,6 +143,9 @@ export function createEmbed(options: EmbedOptions, env: EmbedEnv = defaultEnv())
     }
 
     const permission = await queryPermission(env.navigator);
+    if (permission === 'denied') return set('denied');
+    // Never ask, even silently, on behalf of a page we have not verified.
+    if (!trusted()) return set('waiting-host');
     if (permission === 'granted') {
       // Granted earlier for this pair of sites: Chromium re-activates without a gesture.
       try {
@@ -134,7 +155,6 @@ export function createEmbed(options: EmbedOptions, env: EmbedEnv = defaultEnv())
         // fall through to an explicit gesture
       }
     }
-    if (permission === 'denied') return set('denied');
     return set('needs-gesture');
   }
 
@@ -144,6 +164,7 @@ export function createEmbed(options: EmbedOptions, env: EmbedEnv = defaultEnv())
   }
 
   function request(): Promise<AccessState> {
+    if (!trusted()) return Promise.resolve(state);
     if (state === 'needs-first-party') {
       openFirstParty();
       return Promise.resolve(state);
@@ -170,15 +191,22 @@ export function createEmbed(options: EmbedOptions, env: EmbedEnv = defaultEnv())
     if (msg.kind === 'visited' && event.origin === win.location.origin) {
       visited = true;
       // The popup click spent the activation; one more click in the frame is needed.
-      set('needs-gesture');
+      set(trusted() ? 'needs-gesture' : 'waiting-host');
       return;
     }
 
-    if (event.source !== win.parent || !options.allowedHosts.includes(event.origin)) return;
+    if (event.source !== win.parent || win.parent === win || !options.allowedHosts.includes(event.origin)) return;
 
     if (msg.kind === 'hello') {
+      const wasTrusted = trusted();
       hostOrigin = event.origin;
       post({ ns: NS, kind: 'ready', state });
+      // A check may be in flight and still conclude `waiting-host`: re-check once it settles.
+      if (!wasTrusted) {
+        void (checking ?? Promise.resolve()).then(() => {
+          if (state === 'waiting-host') void embed.check();
+        });
+      }
     } else if (msg.kind === 'call') {
       void handleCall(msg.id, msg.method, msg.params, event.origin);
     }
@@ -187,11 +215,13 @@ export function createEmbed(options: EmbedOptions, env: EmbedEnv = defaultEnv())
   async function handleCall(id: number, method: string, params: unknown, origin: string) {
     const fn = Object.hasOwn(methods, method) ? methods[method] : undefined;
     try {
-      if (!fn) throw new Error(`framepass: unknown method "${method}"`);
+      if (!fn) throw new PublicError(`framepass: unknown method "${method}"`);
       const value = await fn(params, { state, storage, origin });
       post({ ns: NS, kind: 'result', id, ok: true, value });
     } catch (err) {
-      post({ ns: NS, kind: 'result', id, ok: false, error: err instanceof Error ? err.message : String(err) });
+      const reveal = err instanceof PublicError || options.exposeErrors;
+      const error = reveal ? (err instanceof Error ? err.message : String(err)) : `framepass: "${method}" failed`;
+      post({ ns: NS, kind: 'result', id, ok: false, error });
     }
   }
 
@@ -240,6 +270,13 @@ export function createEmbed(options: EmbedOptions, env: EmbedEnv = defaultEnv())
 
   if (options.autoCheck !== false) void embed.check();
   return embed;
+}
+
+/** Chromium and Safari expose the parent's origin synchronously; Firefox relies on the handshake. */
+function isAllowedParent(win: Window, allowedHosts: string[]): boolean {
+  if (win.parent === win) return false;
+  const parent = (win.location as Location & { ancestorOrigins?: DOMStringList }).ancestorOrigins?.[0];
+  return parent !== undefined && allowedHosts.includes(parent);
 }
 
 function defaultEnv(): EmbedEnv {

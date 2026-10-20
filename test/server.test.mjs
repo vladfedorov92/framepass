@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { framepass, serializeCookie, parseCookies, injectScript } from '../dist/server/index.js';
+import { framepass, serializeCookie, parseCookies, injectScript, frameAncestors } from '../dist/server/index.js';
 
 async function withServer(options, fn) {
   const mw = framepass(options);
@@ -126,4 +126,31 @@ test('express-style next is called for unhandled requests', () => {
   };
   mw({ url: '/x', method: 'GET', headers: {} }, res, () => (called = true));
   assert.ok(called);
+});
+
+test('embed paths get frame-ancestors, visit page cannot be framed', async () => {
+  const options = { allowedOrigins: ['https://a.example', 'https://b.example'], embedPaths: ['/embed', /^\/w\d+$/] };
+  await withServer(options, async (url) => {
+    const csp = async (p) => (await fetch(url + p)).headers.get('content-security-policy');
+    assert.equal(await csp('/embed'), 'frame-ancestors https://a.example https://b.example');
+    assert.equal(await csp('/embed/x'), 'frame-ancestors https://a.example https://b.example');
+    assert.equal(await csp('/w42'), 'frame-ancestors https://a.example https://b.example');
+    assert.equal(await csp('/embedded'), null);
+    assert.equal(await csp('/__framepass/visit'), "frame-ancestors 'none'");
+  });
+});
+
+test('allowedOrigins must be bare origins', () => {
+  assert.throws(() => framepass({ allowedOrigins: ['https://a.example/'] }), /not an origin/);
+  assert.throws(() => framepass({ allowedOrigins: ['https://a.example; script-src *'] }), /not an origin/);
+  assert.throws(() => framepass({ allowedOrigins: ['*'] }), /not an origin/);
+  assert.equal(frameAncestors([]), "frame-ancestors 'none'");
+});
+
+test('serializeCookie rejects attribute injection', () => {
+  assert.throws(() => serializeCookie('a;b', 'x'), /cookie name/);
+  assert.throws(() => serializeCookie('s', 'x', { path: '/; Domain=evil.example' }), /cookie path/);
+  assert.throws(() => serializeCookie('s', 'x', { domain: 'a.example\r\nX: y' }), /cookie domain/);
+  assert.throws(() => serializeCookie('s', 'x', { maxAge: Infinity }), /maxAge/);
+  assert.equal(serializeCookie('s', 'a;b'), 's=a%3Bb; Path=/; Secure; SameSite=None');
 });
