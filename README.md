@@ -17,7 +17,6 @@ framepass для тех, у кого есть виджет, чат, плеер, 
 - [API](#api)
 - [Поддержка браузеров](#поддержка-браузеров)
 - [Если доступа нет](#если-доступа-нет)
-- [Работа с проектом](#работа-с-проектом)
 
 ## Проблема
 
@@ -320,60 +319,6 @@ Brave и пользователи со строгими настройками �
 - **SSO** — посмотрите на [FedCM](https://developer.mozilla.org/en-US/docs/Web/API/FedCM_API).
 
 Не используйте цепочки редиректов для синхронизации идентификаторов: защиты от bounce tracking в браузерах их вычищают.
-
-## Работа с проектом
-
-```sh
-git clone https://github.com/vladfedorov92/framepass.git
-cd framepass
-npm install        # заодно собирает dist/
-```
-
-| Команда | |
-|---|---|
-| `npm run build` | сборка TypeScript в `dist/` |
-| `npm test` | сборка и тесты (`node:test`) |
-| `npm run demo` | демо-стенд на двух сайтах |
-
-Структура:
-
-```
-src/core     общие типы, протокол сообщений, определение возможностей
-src/embed    SDK для iframe
-src/host     SDK для сайта-партнёра
-src/server   Node middleware
-src/visit    хелпер для страниц первого визита
-test/        тесты
-demo/        демо-стенд
-```
-
-### Демо
-
-```sh
-npm run demo
-```
-
-1. `http://localhost:4000` — сайт виджета, войдите на нём.
-2. `http://127.0.0.1:3000` — сайт-партнёр с iframe виджета.
-3. `http://127.0.0.1:3000/?visit=login` — то же, но окном первого визита служит страница входа виджета.
-
-Это разные сайты, поэтому куки виджета считаются сторонними. Удобнее всего проверять в
-Chrome Incognito и Firefox. Safari не принимает Secure-куки по http: выпустите сертификаты
-(например, `mkcert host.test widget.test`), пропишите домены в hosts и запустите:
-
-```sh
-FRAMEPASS_CERT=cert.pem FRAMEPASS_KEY=key.pem \
-HOST_ORIGIN=https://host.test:3000 WIDGET_ORIGIN=https://widget.test:4000 npm run demo
-```
-
-### Публикация
-
-```sh
-npm test
-npm version patch     # или minor / major — коммит и тег
-npm publish           # dist/ собирается автоматически (prepare)
-git push --follow-tags
-```
 
 ## Лицензия
 
