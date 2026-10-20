@@ -225,6 +225,74 @@ if (isVisitPopup()) {
 Safari only counts a visit with a user interaction: a click or a form submission works,
 merely opening the page does not.
 
+### Sign-in button (SSO menu)
+
+A common setup: an auth service (`auth.example`) and a portal (`portal.example`) on different sites.
+A hidden iframe from the auth service used to tell the portal who is signed in. It keeps working in
+Chrome, but in Firefox, Safari and private windows the hidden iframe sees an empty cookie jar, and
+a hidden iframe can never be clicked to ask for access.
+
+The fix is to make the portal's "Sign in" button *itself* a small iframe from the auth service.
+`attachLogin()` runs the whole flow from that one click:
+
+```
+cookies already reachable (Chrome, or a grant remembered from an earlier visit)
+  → session visible? → "signed-in" event, no click needed
+
+click on "Sign in"
+  → requestStorageAccess()        Firefox usually grants silently if the user signed in on auth.example before
+  → session visible? ── yes ──► "signed-in" event: the portal signs in without leaving the page
+                     └─ no ───► top-level redirect to the sign-in page, which returns to the portal;
+                                the grant is already there, so the button sees the session afterwards
+```
+
+On the auth service (`/menu-button`, listed in `embedPaths`):
+
+```html
+<button id="login">Sign in</button>
+
+<script type="module">
+  import { createEmbed } from 'framepass/embed';
+
+  const embed = createEmbed({
+    allowedHosts: ['https://portal.example'],
+    firstPartyUrl: null,   // signing in on your own page already is the first-party visit
+    methods: {
+      // a short-lived one-time code for the portal's backend, never the session token itself
+      getLoginCode: () => fetch('/api/one-time-code', { method: 'POST', credentials: 'include' }).then((r) => r.json()),
+    },
+  });
+
+  embed.attachLogin(document.getElementById('login'), {
+    loginUrl: 'https://auth.example/login?return=' + encodeURIComponent('https://portal.example/'),
+    isSignedIn: () => fetch('/api/me', { credentials: 'include' }).then((r) => r.ok),
+  });
+</script>
+```
+
+In the portal's menu script:
+
+```js
+import { mountEmbed } from 'framepass/host';
+
+const login = mountEmbed('#menu-login', {
+  src: 'https://auth.example/menu-button',
+  title: 'Sign in',
+  attributes: { style: 'border:0;width:120px;height:40px;background:transparent' },
+});
+
+login.on('event', async (name) => {
+  if (name !== 'signed-in') return;
+  const { code } = await login.call('getLoginCode');
+  await fetch('/api/session', { method: 'POST', body: JSON.stringify({ code }) }); // exchanged server-to-server
+});
+```
+
+The button gets `data-framepass-login="idle" | "busy" | "signed-in" | "redirect"` for styling.
+If the redirect comes too late after the click for the browser to allow it, the button stays in
+`redirect` and the next click navigates immediately. The sign-in page must only return to allowed
+portal URLs (no open redirect).
+
 ## API
 
 ### `createEmbed(options)` — `framepass/embed`
@@ -248,6 +316,8 @@ Returns:
 | `check()` | work out the state without prompting the user |
 | `request()` | request access. **Call it synchronously from a click handler inside the iframe** |
 | `attach(button)` | bind a button: its click calls `request()`, and `hidden` follows the state. Returns an unbind function |
+| `attachLogin(button, { loginUrl, isSignedIn, silent = true })` | an always-visible sign-in button, see [Sign-in button](#sign-in-button-sso-menu). Returns an unbind function |
+| `emit(name, data?)` | send an event to the host page; queued until the host's handshake |
 | `expose(methods)` | add methods |
 | `on('change', fn)` | subscribe to state changes; returns an unsubscribe function |
 | `destroy()` | remove listeners |
@@ -294,8 +364,12 @@ methods: {
 | `attributes` | `Record<string, string>` | any extra iframe attributes |
 | `timeout` | `number` | `call()` timeout in ms; default 15000 |
 
-Returns `{ iframe, state, ready, call(method, params), on('state', fn), destroy() }`.
-Calls made before the iframe is ready are queued.
+Returns `{ iframe, state, ready, call(method, params), on('state', fn), on('event', fn), destroy() }`.
+Calls made before the iframe is ready are queued. `on('event', (name, data) => …)` receives what the
+embed sends with `emit()`, such as `signed-in` from `attachLogin()`.
+
+With `sandbox`, framepass adds `allow-scripts allow-same-origin allow-storage-access-by-user-activation
+allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation`.
 
 ### `framepass(options)` — `framepass/server`
 

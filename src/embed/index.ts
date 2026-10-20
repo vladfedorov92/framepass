@@ -1,6 +1,7 @@
 import {
   DEFAULT_BASE_PATH,
   NS,
+  hasAccess,
   isMessage,
   queryPermission,
   type AccessState,
@@ -58,10 +59,30 @@ export interface Embed {
   request(): Promise<AccessState>;
   /** Wires a button to `request()` and toggles its `hidden` flag by state. Returns an unbinding function. */
   attach(el: HTMLElement): () => void;
+  /**
+   * Turns an always-visible "Sign in" button into the whole flow: storage access on click,
+   * then either `signed-in` for the host or a top-level redirect to `loginUrl`.
+   * Returns an unbinding function.
+   */
+  attachLogin(el: HTMLElement, options: LoginOptions): () => void;
+  /** Sends an event to the host page (`widget.on('event', fn)`). */
+  emit(name: string, data?: unknown): void;
   expose(methods: Methods): void;
   on(event: 'change', fn: (state: AccessState) => void): () => void;
   destroy(): void;
 }
+
+export interface LoginOptions {
+  /** Your sign-in page; opened in the top window when there is no session or no cookie access. */
+  loginUrl: string;
+  /** Resolves true when the session is visible, e.g. `() => fetch('/api/me', { credentials: 'include' }).then((r) => r.ok)`. */
+  isSignedIn: () => Promise<boolean>;
+  /** Also check silently whenever access is already there, without a click (default true). */
+  silent?: boolean;
+}
+
+/** `data-framepass-login` on the button while the flow runs. */
+export type LoginStatus = 'idle' | 'busy' | 'signed-in' | 'redirect';
 
 /** Globals the embed touches; injectable for tests. */
 export interface EmbedEnv {
@@ -90,6 +111,8 @@ export function createEmbed(options: EmbedOptions, env: EmbedEnv = defaultEnv())
   const trusted = () => ancestors === 'allowed' || (ancestors === 'unknown' && hostOrigin !== undefined);
   let visited = false;
   let checking: Promise<AccessState> | undefined;
+  // Events raised before the host's handshake (e.g. a silent sign-in) wait for it.
+  const pendingEvents: Message[] = [];
 
   const api = doc as Document & {
     hasStorageAccess?: () => Promise<boolean>;
@@ -170,7 +193,12 @@ export function createEmbed(options: EmbedOptions, env: EmbedEnv = defaultEnv())
       openFirstParty();
       return Promise.resolve(state);
     }
-    if (!supported) return Promise.resolve(state);
+    return requestAccess();
+  }
+
+  // The bare Storage Access request, without the first-party popup step.
+  function requestAccess(): Promise<AccessState> {
+    if (!trusted() || !supported) return Promise.resolve(state);
 
     let pending: Promise<void>;
     try {
@@ -202,6 +230,7 @@ export function createEmbed(options: EmbedOptions, env: EmbedEnv = defaultEnv())
       const wasTrusted = trusted();
       hostOrigin = event.origin;
       post({ ns: NS, kind: 'ready', state });
+      pendingEvents.splice(0).forEach(post);
       // A check may be in flight and still conclude `waiting-host`: re-check once it settles.
       if (!wasTrusted) {
         void (checking ?? Promise.resolve()).then(() => {
@@ -255,6 +284,65 @@ export function createEmbed(options: EmbedOptions, env: EmbedEnv = defaultEnv())
         el.removeEventListener('click', onClick);
         off();
       };
+    },
+    attachLogin(el, login) {
+      let status: LoginStatus = 'idle';
+      // Once a redirect was due, the next click navigates synchronously: if the first attempt
+      // came too late after the click (activation expired), the browser may have blocked it.
+      let redirectDue = false;
+      const setStatus = (s: LoginStatus) => {
+        status = s;
+        el.dataset.framepassLogin = s;
+      };
+      const signedIn = async () => hasAccess(state) && (await login.isSignedIn().catch(() => false));
+      const reportSignedIn = () => {
+        setStatus('signed-in');
+        embed.emit('signed-in');
+      };
+      const redirect = () => {
+        redirectDue = true;
+        setStatus('redirect');
+        win.open(login.loginUrl, '_top');
+      };
+
+      const onClick = (event: Event) => {
+        event.preventDefault();
+        if (status === 'busy') return;
+        if (status === 'signed-in') return reportSignedIn();
+        if (redirectDue) return redirect();
+        setStatus('busy');
+        // Synchronous up to requestStorageAccess(), like request().
+        const access = hasAccess(state) ? Promise.resolve(state) : requestAccess();
+        void access
+          .then(signedIn)
+          .then((ok) => (ok ? reportSignedIn() : redirect()))
+          .catch(() => setStatus('idle'));
+      };
+
+      // Chrome with third-party cookies, or a grant remembered from an earlier visit:
+      // sign in without a click. Never redirect without one.
+      let silentRun = false;
+      const trySilent = (s: AccessState) => {
+        if (login.silent === false || silentRun || status !== 'idle' || !hasAccess(s)) return;
+        silentRun = true;
+        void signedIn().then((ok) => {
+          if (ok && status === 'idle') reportSignedIn();
+        });
+      };
+
+      setStatus('idle');
+      el.addEventListener('click', onClick);
+      trySilent(state);
+      const off = embed.on('change', trySilent);
+      return () => {
+        el.removeEventListener('click', onClick);
+        off();
+      };
+    },
+    emit(name, data) {
+      const msg: Message = { ns: NS, kind: 'event', name, data };
+      if (hostOrigin) post(msg);
+      else pendingEvents.push(msg);
     },
     expose(more) {
       Object.assign(methods, more);

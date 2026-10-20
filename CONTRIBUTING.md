@@ -37,6 +37,7 @@ npm run demo
 1. `http://localhost:4000`: the widget site, sign in there.
 2. `http://127.0.0.1:3000`: the partner site with the widget iframe.
 3. `http://127.0.0.1:3000/?visit=login`: same, but the widget's login page serves as the first-party visit popup.
+4. `http://127.0.0.1:3000/?mode=button`: the widget is only a "Sign in" button in a portal menu (`attachLogin`).
 
 These are different sites, so the widget's cookies are third-party. Chrome Incognito and Firefox
 are the easiest to test with. Safari does not accept Secure cookies over http: issue certificates

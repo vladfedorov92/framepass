@@ -24,6 +24,8 @@ export interface MountedEmbed {
   readonly ready: Promise<AccessState>;
   call<T = unknown>(method: string, params?: unknown): Promise<T>;
   on(event: 'state', fn: (state: AccessState) => void): () => void;
+  /** Events sent by the embed with `emit()`, e.g. `signed-in` from `attachLogin()`. */
+  on(event: 'event', fn: (name: string, data: unknown) => void): () => void;
   destroy(): void;
 }
 
@@ -33,6 +35,8 @@ export const REQUIRED_SANDBOX = [
   'allow-storage-access-by-user-activation',
   'allow-popups',
   'allow-popups-to-escape-sandbox',
+  // attachLogin() sends the user to the sign-in page in the top window, on their click only.
+  'allow-top-navigation-by-user-activation',
 ];
 
 const HELLO_INTERVAL = 300;
@@ -45,6 +49,7 @@ export function mountEmbed(target: string | Element, options: MountOptions): Mou
   const origin = new URL(options.src, location.href).origin;
   const timeout = options.timeout ?? 15000;
   const listeners = new Set<(state: AccessState) => void>();
+  const eventListeners = new Set<(name: string, data: unknown) => void>();
   const pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void; timer: number }>();
   const queue: Message[] = [];
 
@@ -105,6 +110,8 @@ export function mountEmbed(target: string | Element, options: MountOptions): Mou
       }
     } else if (msg.kind === 'state') {
       setState(msg.state);
+    } else if (msg.kind === 'event') {
+      eventListeners.forEach((fn) => fn(msg.name, msg.data));
     } else if (msg.kind === 'result') {
       const entry = pending.get(msg.id);
       if (!entry) return;
@@ -144,9 +151,10 @@ export function mountEmbed(target: string | Element, options: MountOptions): Mou
         else queue.push(msg);
       });
     },
-    on(_event, fn) {
-      listeners.add(fn);
-      return () => listeners.delete(fn);
+    on(event: 'state' | 'event', fn: any) {
+      const set = event === 'event' ? eventListeners : listeners;
+      set.add(fn);
+      return () => set.delete(fn);
     },
     destroy() {
       stopHello();
@@ -158,6 +166,7 @@ export function mountEmbed(target: string | Element, options: MountOptions): Mou
       });
       pending.clear();
       listeners.clear();
+      eventListeners.clear();
       iframe.remove();
     },
   };

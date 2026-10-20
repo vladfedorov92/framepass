@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sign in</title>
+  <style>
+    html, body { margin: 0; background: transparent; }
+    button { font: 15px/1 system-ui, sans-serif; padding: .55rem 1rem; border: 0; border-radius: 6px;
+             background: #2b4c7e; color: #fff; cursor: pointer; white-space: nowrap; }
+    button[data-framepass-login="busy"] { opacity: .6; cursor: progress; }
+    button[data-framepass-login="signed-in"] { background: #2e7d4f; }
+  </style>
+</head>
+<body>
+  <button id="login" type="button">Sign in</button>
+
+  <script type="module">
+    import { createEmbed } from '/lib/embed/index.js';
+
+    const me = () => fetch('/api/me', { credentials: 'include', cache: 'no-store' }).then((r) => r.json());
+    const button = document.getElementById('login');
+
+    const embed = createEmbed({
+      allowedHosts: ['__HOST_ORIGIN__'],
+      firstPartyUrl: null,   // signing in on our own page is the first-party visit
+      methods: { getSession: () => me() },
+    });
+
+    // The partner page asked to come back to it after signing in.
+    const returnTo = '__HOST_ORIGIN__/?mode=button';
+    embed.attachLogin(button, {
+      loginUrl: `__WIDGET_ORIGIN__/?return=${encodeURIComponent(returnTo)}`,
+      isSignedIn: () => me().then((s) => !!s.user),
+    });
+
+    new MutationObserver(() => {
+      button.textContent = button.dataset.framepassLogin === 'signed-in' ? 'Signed in ✓' : 'Sign in';
+    }).observe(button, { attributes: true, attributeFilter: ['data-framepass-login'] });
+  </script>
+</body>
+</html>

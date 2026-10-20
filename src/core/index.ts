@@ -36,7 +36,8 @@ export type Message =
   | { ns: typeof NS; kind: 'call'; id: number; method: string; params?: unknown }
   | { ns: typeof NS; kind: 'result'; id: number; ok: true; value: unknown }
   | { ns: typeof NS; kind: 'result'; id: number; ok: false; error: string }
-  | { ns: typeof NS; kind: 'visited' };
+  | { ns: typeof NS; kind: 'visited' }
+  | { ns: typeof NS; kind: 'event'; name: string; data?: unknown };
 
 export function isMessage(data: unknown): data is Message {
   return typeof data === 'object' && data !== null && (data as { ns?: unknown }).ns === NS;

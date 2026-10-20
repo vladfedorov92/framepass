@@ -14,7 +14,9 @@
 <body>
   <h1>Partner site <small><code>__HOST_ORIGIN__</code></small></h1>
   <p>Below is the widget from <code>__WIDGET_ORIGIN__</code>. Access state: <b id="state">unknown</b></p>
-  <p>First-party visit popup: <a href="/">custom framepass page</a> · <a href="/?visit=login">widget login page</a></p>
+  <p>First-party visit popup: <a href="/">custom framepass page</a> · <a href="/?visit=login">widget login page</a>
+     · <a href="/?mode=button">sign-in button (SSO menu)</a></p>
+  <p id="menu" hidden>Portal menu: Home · Catalog · <span id="menu-login"></span> <b id="greeting"></b></p>
   <div id="slot"></div>
   <p><button id="who" type="button">Ask the widget: who am I?</button></p>
   <pre id="out">—</pre>
@@ -22,21 +24,43 @@
   <script type="module">
     import { mountEmbed } from '/lib/host/index.js';
 
-    // ?visit=login: the first-party popup is the widget's login page instead of /__framepass/visit
-    const visit = new URLSearchParams(location.search).get('visit') === 'login' ? '?visit=login' : '';
-    const embed = mountEmbed('#slot', { src: `__WIDGET_ORIGIN__/embed${visit}`, title: 'Demo widget' });
+    const params = new URLSearchParams(location.search);
     const show = (s) => (document.getElementById('state').textContent = s);
-    embed.ready.then(show);
-    embed.on('state', show);
 
-    document.getElementById('who').addEventListener('click', async () => {
-      const out = document.getElementById('out');
-      try {
-        out.textContent = JSON.stringify(await embed.call('getSession'), null, 2);
-      } catch (e) {
-        out.textContent = String(e);
-      }
-    });
+    if (params.get('mode') === 'button') {
+      // The widget is only a "Sign in" button in the portal menu (attachLogin).
+      document.getElementById('menu').hidden = false;
+      document.getElementById('slot').remove();
+      document.getElementById('who').parentElement.remove();
+      document.getElementById('out').remove();
+      const login = mountEmbed('#menu-login', {
+        src: '__WIDGET_ORIGIN__/login-button',
+        title: 'Sign in',
+        attributes: { style: 'border:0;width:130px;height:40px;vertical-align:middle;background:transparent' },
+      });
+      login.on('state', show);
+      login.on('event', async (name) => {
+        if (name !== 'signed-in') return;
+        // A real portal would fetch a one-time code here and exchange it on its backend.
+        const { user } = await login.call('getSession');
+        document.getElementById('greeting').textContent = `Hello, ${user}`;
+      });
+    } else {
+      // ?visit=login: the first-party popup is the widget's login page instead of /__framepass/visit
+      const visit = params.get('visit') === 'login' ? '?visit=login' : '';
+      const embed = mountEmbed('#slot', { src: `__WIDGET_ORIGIN__/embed${visit}`, title: 'Demo widget' });
+      embed.ready.then(show);
+      embed.on('state', show);
+
+      document.getElementById('who').addEventListener('click', async () => {
+        const out = document.getElementById('out');
+        try {
+          out.textContent = JSON.stringify(await embed.call('getSession'), null, 2);
+        } catch (e) {
+          out.textContent = String(e);
+        }
+      });
+    }
   </script>
 </body>
 </html>

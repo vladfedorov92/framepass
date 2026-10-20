@@ -12,6 +12,7 @@
   <p>__USER__</p>
   <form method="post" action="/login">
     <input name="name" placeholder="Name" required>
+    <input type="hidden" name="return" id="return">
     <button>Sign in</button>
   </form>
   <p id="back" hidden><button type="button">Back to the widget</button></p>
@@ -19,6 +20,9 @@
 
   <script type="module">
     import { isVisitPopup, notifyVisited } from '/lib/visit/index.js';
+
+    // Sent here by the partner's "Sign in" button: return there after signing in (checked on the server).
+    document.getElementById('return').value = new URLSearchParams(location.search).get('return') ?? '';
 
     // Opened by the widget as its first-party popup: after login, report the visit and close.
     if (isVisitPopup()) {
