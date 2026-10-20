@@ -54,7 +54,7 @@ listen(HOST_ORIGIN, (req, res) => {
 // Way 1: a branded visit page; framepass injects its script, the button only needs data-framepass-continue.
 const fp = framepass({
   allowedOrigins: [HOST_ORIGIN],
-  embedPaths: ['/embed'],
+  embedPaths: ['/embed', '/login-button'],
   visitPage: () => readFile(join(root, 'demo', 'visit.html'), 'utf8'),
 });
 
@@ -69,6 +69,10 @@ listen(WIDGET_ORIGIN, async (req, res) => {
     return sendFile(res, join(root, 'demo', 'embed.html'), vars);
   }
 
+  if (path === '/login-button') {
+    return sendFile(res, join(root, 'demo', 'login-button.html'), vars);
+  }
+
   if (path === '/api/me') {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Cache-Control', 'no-store');
@@ -78,10 +82,14 @@ listen(WIDGET_ORIGIN, async (req, res) => {
   if (path === '/login' && req.method === 'POST') {
     let body = '';
     for await (const chunk of req) body += chunk;
-    const name = new URLSearchParams(body).get('name')?.trim() || 'guest';
+    const form = new URLSearchParams(body);
+    const name = form.get('name')?.trim() || 'guest';
+    // Like a real SSO: go back to the partner page, but only to an allowed origin (no open redirect).
+    const back = form.get('return') ?? '';
+    const safeBack = back.startsWith(`${HOST_ORIGIN}/`) ? back : '/';
     appendSetCookie(res, serializeCookie('demo_session', name, { httpOnly: true, maxAge: 86400 }));
     res.statusCode = 303;
-    res.setHeader('Location', '/');
+    res.setHeader('Location', safeBack);
     return res.end();
   }
 

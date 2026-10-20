@@ -177,3 +177,92 @@ test('masked ("null") ancestors fall back to the handshake', async () => {
   for (let i = 0; i < 5; i++) await tick();
   assert.equal(embed.state, 'needs-gesture');
 });
+
+function fakeButton() {
+  return {
+    dataset: {},
+    addEventListener(_t, fn) { this.handler = fn; },
+    removeEventListener() { this.handler = undefined; },
+    click() { this.handler?.({ preventDefault() {} }); },
+  };
+}
+const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
+const events = (f) => f.parent.sent.filter((s) => s.msg.kind === 'event').map((s) => s.msg.name);
+const LOGIN = 'https://widget.example/login';
+
+test('attachLogin: silent sign-in when cookies already flow, delivered after the handshake', async () => {
+  const f = fakeEnv({ hasAccess: true });
+  const embed = createEmbed({ allowedHosts: [HOST] }, f.env);
+  const button = fakeButton();
+  embed.attachLogin(button, { loginUrl: LOGIN, isSignedIn: async () => true });
+  await settle();
+  assert.equal(button.dataset.framepassLogin, 'signed-in');
+  assert.deepEqual(events(f), [], 'queued until the host says hello');
+
+  f.dispatch({ ns: 'framepass', kind: 'hello' });
+  assert.deepEqual(events(f), ['signed-in']);
+  assert.equal(f.opened.length, 0);
+});
+
+test('attachLogin: silent check never redirects without a click', async () => {
+  const f = fakeEnv({ hasAccess: true });
+  const embed = createEmbed({ allowedHosts: [HOST] }, f.env);
+  const button = fakeButton();
+  embed.attachLogin(button, { loginUrl: LOGIN, isSignedIn: async () => false });
+  await settle();
+  assert.equal(button.dataset.framepassLogin, 'idle');
+  assert.equal(f.opened.length, 0);
+});
+
+test('attachLogin: click requests access, then reports a visible session', async () => {
+  const f = fakeEnv();
+  const embed = createEmbed({ allowedHosts: [HOST] }, f.env);
+  await embed.check();
+  const button = fakeButton();
+  embed.attachLogin(button, { loginUrl: LOGIN, isSignedIn: async () => true });
+
+  button.click();
+  assert.equal(f.calls.request, 1, 'requestStorageAccess called synchronously in the click');
+  await settle();
+  assert.equal(button.dataset.framepassLogin, 'signed-in');
+  f.dispatch({ ns: 'framepass', kind: 'hello' });
+  assert.deepEqual(events(f), ['signed-in']);
+});
+
+test('attachLogin: no session after access -> top-level redirect, next click redirects at once', async () => {
+  const f = fakeEnv();
+  const embed = createEmbed({ allowedHosts: [HOST] }, f.env);
+  await embed.check();
+  const button = fakeButton();
+  embed.attachLogin(button, { loginUrl: LOGIN, isSignedIn: async () => false });
+
+  button.click();
+  await settle();
+  assert.deepEqual(f.opened, [LOGIN]);
+  assert.equal(button.dataset.framepassLogin, 'redirect');
+
+  button.click();
+  assert.deepEqual(f.opened, [LOGIN, LOGIN], 'second click navigates synchronously');
+  assert.equal(f.calls.request, 1);
+});
+
+test('attachLogin: refused access or an unverified page falls back to the redirect', async () => {
+  const refused = fakeEnv({ grant: false });
+  const a = createEmbed({ allowedHosts: [HOST], firstPartyUrl: null }, refused.env);
+  await a.check();
+  const b1 = fakeButton();
+  a.attachLogin(b1, { loginUrl: LOGIN, isSignedIn: async () => true });
+  b1.click();
+  await settle();
+  assert.deepEqual(refused.opened, [LOGIN]);
+
+  const foreign = fakeEnv({ ancestor: [HOST, 'https://evil.example'] });
+  const b = createEmbed({ allowedHosts: [HOST] }, foreign.env);
+  await b.check();
+  const b2 = fakeButton();
+  b.attachLogin(b2, { loginUrl: LOGIN, isSignedIn: async () => true });
+  b2.click();
+  await settle();
+  assert.equal(foreign.calls.request, 0, 'no access request for an unverified page');
+  assert.deepEqual(foreign.opened, [LOGIN]);
+});
