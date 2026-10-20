@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Демо-виджет</title>
+  <style>
+    body { font: 15px/1.5 system-ui, sans-serif; margin: 0; padding: 1rem; background: #fbfaf7; }
+    button { font: inherit; padding: .4rem 1rem; cursor: pointer; }
+    .muted { color: #666; }
+  </style>
+</head>
+<body>
+  <p>Виджет на <code>__WIDGET_ORIGIN__</code> · состояние: <b id="state">unknown</b></p>
+  <p id="user" class="muted">…</p>
+  <button id="allow" type="button" hidden>Разрешить доступ</button>
+  <p id="hint" class="muted"></p>
+
+  <script type="module">
+    import { createEmbed, hasAccess } from '/lib/embed/index.js';
+
+    const hints = {
+      'needs-gesture': 'Браузер прячет наши куки. Нажмите кнопку — он спросит разрешение.',
+      'needs-first-party': 'Сначала нужно один раз открыть наш сайт. Кнопка откроет его во всплывающем окне.',
+      'denied': 'Доступ не выдан. Можно попробовать ещё раз.',
+      'unsupported': 'Браузер не поддерживает Storage Access API — нужен запасной вариант (popup + токен).',
+    };
+
+    async function getSession() {
+      const res = await fetch('/api/me', { credentials: 'include', cache: 'no-store' });
+      return res.json();
+    }
+
+    const embed = createEmbed({
+      allowedHosts: ['__HOST_ORIGIN__'],
+      methods: { getSession: (_params, ctx) => getSession().then((s) => ({ ...s, access: ctx.state })) },
+    });
+
+    async function render(state) {
+      document.getElementById('state').textContent = state;
+      document.getElementById('hint').textContent = hints[state] ?? '';
+      const { user } = await getSession();
+      document.getElementById('user').innerHTML = user
+        ? `Сессия видна: <b>${user.replace(/[<>&"]/g, '')}</b>`
+        : hasAccess(state)
+          ? 'Куки доступны, но вы не вошли. <a href="__WIDGET_ORIGIN__/" target="_blank">Войти на сайте виджета</a>'
+          : 'Сессия не видна из iframe.';
+    }
+
+    embed.attach(document.getElementById('allow'));
+    embed.on('change', render);
+    embed.check().then(render);
+  </script>
+</body>
+</html>

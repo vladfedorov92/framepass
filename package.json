@@ -1,0 +1,47 @@
+{
+  "name": "framepass",
+  "version": "0.1.0",
+  "description": "Storage Access API made practical: cross-site cookie access for embedded iframes, with host bridge and server middleware.",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "default": "./dist/core/index.js"
+    },
+    "./embed": {
+      "types": "./dist/embed/index.d.ts",
+      "default": "./dist/embed/index.js"
+    },
+    "./host": {
+      "types": "./dist/host/index.d.ts",
+      "default": "./dist/host/index.js"
+    },
+    "./server": {
+      "types": "./dist/server/index.d.ts",
+      "default": "./dist/server/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/",
+    "demo": "npm run build && node demo/serve.mjs"
+  },
+  "keywords": [
+    "storage-access-api",
+    "third-party-cookies",
+    "iframe",
+    "chips",
+    "partitioned-cookies"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^5.9.3"
+  }
+}
