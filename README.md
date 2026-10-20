@@ -252,6 +252,8 @@ Returns:
 | `on('change', fn)` | subscribe to state changes; returns an unsubscribe function |
 | `destroy()` | remove listeners |
 
+`params` come from the partner page: treat them as untrusted input and validate them like any request body.
+
 When a method throws, the partner only receives `framepass: "<method>" failed`. To pass a
 readable message, throw a `PublicError`:
 
@@ -300,7 +302,7 @@ Calls made before the iframe is ready are queued.
 | Option | Default | |
 |---|---|---|
 | `allowedOrigins` | — | partner sites, as bare origins (`https://shop.example`, no `/` or `*`). **Required** |
-| `embedPaths` | — | pages served into iframes (`'/embed'` matches the page and everything under `/embed/`, or a `RegExp`); they get `frame-ancestors` from `allowedOrigins` |
+| `embedPaths` | — | pages served into iframes (`'/embed'` matches the page and everything under `/embed/`, or a `RegExp`); they get `frame-ancestors` from `allowedOrigins`. Paths are matched case-insensitively, percent-decoded and with repeated slashes collapsed, the way lenient routers such as Express resolve them |
 | `basePath` | `/__framepass` | prefix of the service endpoints |
 | `markerCookie` | `__framepass_fp` | marker cookie name |
 | `markerMaxAge` | 30 days | marker lifetime, seconds |
@@ -312,8 +314,12 @@ What the middleware does:
 - `GET {basePath}/visit`: the first-party visit page;
 - `GET {basePath}/visit.js`: its script;
 - sets the marker cookie on direct visits to the site;
-- sets `Content-Security-Policy: frame-ancestors` on `embedPaths` and `frame-ancestors 'none'` on the visit page
-  (an existing CSP that already has `frame-ancestors` is left alone);
+- adds `Content-Security-Policy: frame-ancestors` to `embedPaths` and `frame-ancestors 'none'` to the visit page.
+  The policy is attached when the headers are sent, as a separate policy next to any CSP your app sets, so
+  later code cannot drop it. Browsers enforce every policy at once: the result is never looser than ours.
+  If another policy also restricts framing (for example [helmet](https://helmetjs.github.io/)'s default
+  `frame-ancestors 'self'`), both apply and partners get blocked; turn that directive off for embed pages,
+  e.g. `helmet({ contentSecurityPolicy: { directives: { frameAncestors: null } } })`;
 - Storage Access Headers: answers `Sec-Fetch-Storage-Access: inactive` from an allowed site with
   `Activate-Storage-Access: retry`, and an iframe load with `active` with `load`.
 
@@ -358,11 +364,14 @@ cookie access to a frame on someone else's site widens the attack surface. What 
 handles and what is up to you:
 
 **framepass handles**
-- Access is requested (silently or not) only when the parent page is one of `allowedHosts`.
-  This is checked with `location.ancestorOrigins` (Chromium, Safari) or the `framepass/host` handshake,
-  so an attacker's site that frames your widget cannot trick the user into granting access (clickjacking).
-- `embedPaths` stops other sites from framing your widget pages (`frame-ancestors`), and the
-  visit page cannot be framed at all.
+- Access is requested (silently or not) only when the embedding pages are in `allowedHosts`, so an
+  attacker's site that frames your widget cannot trick the user into granting access (clickjacking).
+  Chromium and Safari expose the whole frame chain (`location.ancestorOrigins`), and every ancestor must
+  be allowed: an allowed partner page framed by a foreign site does not count. Firefox does not expose
+  the chain, so there it relies on the `framepass/host` handshake with the parent plus `frame-ancestors`,
+  which the browser checks along the whole chain. **Use `embedPaths`** (or your own `frame-ancestors`).
+- `embedPaths` stops other sites from framing your widget pages (`frame-ancestors`), however the router
+  spells the path, and the visit page cannot be framed at all.
 - Messages are accepted only from the expected window and origin and sent only to an exact origin.
   Only explicitly declared methods can be called.
 - Method error messages do not reach the partner unless `exposeErrors` is on or a `PublicError` is thrown.
@@ -373,7 +382,9 @@ handles and what is up to you:
   give the widget its own cookie with minimal rights, and protect every state-changing request with
   an `Origin` header check and/or CSRF tokens.
 - **Minimal data in methods.** Whatever a method returns, the partner site receives. Return what the UI
-  needs (a name, a status), never tokens or more personal data than necessary.
+  needs (a name, a status), never tokens or more personal data than necessary. This also limits the damage
+  if a partner site gets an XSS: its attacker can call your methods just as the partner can.
+- **Validate `params`.** They are written by the partner page, not by you.
 - **The partner list.** `allowedHosts` and `allowedOrigins` are your trust boundary: exact origins only, no wildcards.
 - **The demo** (`demo/`) is for local testing, not a production template.
 

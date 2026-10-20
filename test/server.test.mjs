@@ -154,3 +154,51 @@ test('serializeCookie rejects attribute injection', () => {
   assert.throws(() => serializeCookie('s', 'x', { maxAge: Infinity }), /maxAge/);
   assert.equal(serializeCookie('s', 'a;b'), 's=a%3Bb; Path=/; Secure; SameSite=None');
 });
+
+test('embed path matching survives case, encoding and slash tricks', async () => {
+  const options = { allowedOrigins: ['https://a.example'], embedPaths: ['/embed'] };
+  await withServer(options, async (url) => {
+    for (const p of ['/EMBED', '/Embed/x', '/%65mbed', '/%2565mbed', '//embed', '/embed/']) {
+      const csp = (await fetch(url + p)).headers.get('content-security-policy');
+      assert.equal(csp, 'frame-ancestors https://a.example', p);
+    }
+    assert.equal((await fetch(`${url}/embedded`)).headers.get('content-security-policy'), null);
+  });
+});
+
+async function withHandler(options, handler, fn) {
+  const mw = framepass(options);
+  const server = createServer((req, res) => {
+    if (!mw(req, res)) handler(req, res);
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  try {
+    await fn(`http://127.0.0.1:${server.address().port}`);
+  } finally {
+    server.close();
+  }
+}
+
+test('a CSP set later by the app cannot drop frame-ancestors', async () => {
+  const options = { allowedOrigins: ['https://a.example'], embedPaths: ['/embed'] };
+  const handler = (req, res) => {
+    res.setHeader('Content-Security-Policy', "default-src 'self'");
+    res.end('page');
+  };
+  await withHandler(options, handler, async (url) => {
+    const csp = (await fetch(`${url}/embed`)).headers.get('content-security-policy');
+    assert.equal(csp, "default-src 'self', frame-ancestors https://a.example");
+  });
+});
+
+test('a CSP passed to writeHead cannot drop frame-ancestors either', async () => {
+  const options = { allowedOrigins: ['https://a.example'], embedPaths: ['/embed'] };
+  const handler = (req, res) => {
+    res.writeHead(200, { 'content-security-policy': 'frame-ancestors *' });
+    res.end('page');
+  };
+  await withHandler(options, handler, async (url) => {
+    const csp = (await fetch(`${url}/embed`)).headers.get('content-security-policy');
+    assert.equal(csp, 'frame-ancestors *, frame-ancestors https://a.example');
+  });
+});
